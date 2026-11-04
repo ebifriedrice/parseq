@@ -3,4 +3,4 @@
 
   Parses SQL through SQLite's own parser and name resolver (vendored
   amalgamation with parse-coverage hooks) and returns unambiguous,
-  machine-readable trees as plain Clojure data."))
+  machine-readable trees as plain Clojure data.")
