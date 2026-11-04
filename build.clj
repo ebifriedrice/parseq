@@ -5,12 +5,36 @@
 
 (def lib 'net.clojars.ebifriedrice/parseq)
 (def version "0.1.0-SNAPSHOT")
-#_ ; alternatively, use MAJOR.MINOR.COMMITS:
-(def version (format "1.0.%s" (b/git-count-revs nil)))
 (def class-dir "target/classes")
 
+(defn native
+  "Build libsqltree (and the C smoke test) with CMake + Ninja."
+  [opts]
+  (let [{:keys [exit]} (b/process {:command-args
+                                   ["cmake" "-S" "native" "-B" "native/build"
+                                    "-G" "Ninja"]
+                                  :out :inherit})]
+    (when-not (zero? exit) (throw (ex-info "cmake configure failed" {}))))
+  (let [{:keys [exit]} (b/process {:command-args
+                                   ["cmake" "--build" "native/build"]
+                                  :out :inherit})]
+    (when-not (zero? exit) (throw (ex-info "cmake build failed" {}))))
+  opts)
+
+(defn javac
+  "Compile the JNI glue class parseq.native.Sqltree."
+  [opts]
+  (b/javac {:src-dirs ["java"]
+            :class-dir class-dir
+            :basis (b/create-basis {})
+            :javac-opts ["--release" "21" "-Xlint:all"]})
+  opts)
+
 (defn test "Run all the tests." [opts]
-  (let [basis    (b/create-basis {:aliases [:test]})
+  (native nil)
+  (javac nil)
+  (let [basis    (b/create-basis {:aliases [:test]
+                                  :extra-paths [class-dir "java"]})
         cmds     (b/java-command
                   {:basis      basis
                     :main      'clojure.main
