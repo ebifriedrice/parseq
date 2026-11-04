@@ -19,6 +19,7 @@
 
 /* Statement lifecycle */
 int sqltreeStmtFinish(Parse *pParse);                    /* sqlite3FinishCoding */
+int sqltreeValuesRow(Parse *pParse, Select *pBody, ExprList *pRow); /* sqlite3MultiValues */
 int sqltreeSelect(Parse *pParse, Select *p);             /* sqlite3Select */
 int sqltreeInsert(Parse *pParse, SrcList *pTab, Select *pSel, IdList *pCols,
                   int onError, Upsert *pUpsert);

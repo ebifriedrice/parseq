@@ -175,7 +175,15 @@
    Vdbe *v;               /* The virtual database engine */
    Table *pTab;           /* The table from which records will be deleted */
    int i;                 /* Loop counter */
-@@ -140225,6 +140248,7 @@
+@@ -140105,6 +140128,7 @@
+         sqlite3VdbeAddOp1(pParse->pVdbe, OP_Yield, pSubq->regReturn);
+       }
+     }
++    sqltreeValuesRow(pParse, pLeft, pRow);
+     sqlite3ExprListDelete(pParse->db, pRow);
+   }
+ 
+@@ -140225,6 +140249,7 @@
    int onError,          /* How to handle constraint errors */
    Upsert *pUpsert       /* ON CONFLICT clauses for upsert, or NULL */
  ){
@@ -183,7 +191,7 @@
    sqlite3 *db;          /* The main database structure */
    Table *pTab;          /* The table to insert into.  aka TABLE */
    int i, j;             /* Loop counters */
-@@ -145745,6 +145769,7 @@
+@@ -145745,6 +145770,7 @@
    Token *pValue,      /* Token for <value>, or NULL */
    int minusFlag       /* True if a '-' sign preceded <value> */
  ){
@@ -191,7 +199,7 @@
    char *zLeft = 0;       /* Nul-terminated UTF-8 string <id> */
    char *zRight = 0;      /* Nul-terminated UTF-8 string <value>, or NULL */
    const char *zDb = 0;   /* The database name */
-@@ -157354,6 +157379,7 @@
+@@ -157354,6 +157380,7 @@
    if( pParse->nErr ){
      goto select_end;
    }
@@ -199,7 +207,7 @@
    assert( db->mallocFailed==0 );
    assert( p->pEList!=0 );
  #if TREETRACE_ENABLED
-@@ -159212,6 +159238,7 @@
+@@ -159212,6 +159239,7 @@
    Token nameToken;                        /* Trigger name for error reporting */
    i64 n;                                  /* Number of steps */
  
@@ -207,7 +215,7 @@
    pParse->pNewTrigger = 0;
    if( NEVER(pParse->nErr) || !pTrig ) goto triggerfinish_cleanup;
    zName = pTrig->zName;
-@@ -159540,6 +159567,7 @@
+@@ -159540,6 +159568,7 @@
  ** instead of the trigger name.
  **/
  SQLITE_PRIVATE void sqlite3DropTrigger(Parse *pParse, SrcList *pName, int noErr){
@@ -215,7 +223,7 @@
    Trigger *pTrigger = 0;
    int i;
    const char *zDb;
-@@ -160765,6 +160793,7 @@
+@@ -160765,6 +160794,7 @@
    Expr *pLimit,          /* LIMIT clause. May be null */
    Upsert *pUpsert        /* ON CONFLICT clause, or null */
  ){
@@ -223,7 +231,7 @@
    int i, j, k;           /* Loop counters */
    Table *pTab;           /* The table to be updated */
    int addrTop = 0;       /* VDBE instruction address of the start of the loop */
-@@ -162275,6 +162304,7 @@
+@@ -162275,6 +162305,7 @@
  ** following reboot.
  */
  SQLITE_PRIVATE void sqlite3Vacuum(Parse *pParse, Token *pNm, Expr *pInto){
