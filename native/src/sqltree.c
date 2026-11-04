@@ -2223,13 +2223,13 @@ static char *sqtJniCStr(JNIEnv *env, jstring s){
 }
 
 JNIEXPORT jstring JNICALL
-Java_parseq_native_Sqltree_version(JNIEnv *env, jclass cls){
+Java_parseq_sqltree_Sqltree_version(JNIEnv *env, jclass cls){
   (void)cls;
   return sqtJniStr(env, sqt_version());
 }
 
 JNIEXPORT jlong JNICALL
-Java_parseq_native_Sqltree_open(JNIEnv *env, jclass cls, jstring path){
+Java_parseq_sqltree_Sqltree_open(JNIEnv *env, jclass cls, jstring path){
   char *zPath;
   void *h;
   (void)cls;
@@ -2241,13 +2241,13 @@ Java_parseq_native_Sqltree_open(JNIEnv *env, jclass cls, jstring path){
 }
 
 JNIEXPORT void JNICALL
-Java_parseq_native_Sqltree_close(JNIEnv *env, jclass cls, jlong h){
+Java_parseq_sqltree_Sqltree_close(JNIEnv *env, jclass cls, jlong h){
   (void)env; (void)cls;
   sqt_close((void*)(intptr_t)h);
 }
 
 JNIEXPORT jstring JNICALL
-Java_parseq_native_Sqltree_parse(JNIEnv *env, jclass cls, jlong h,
+Java_parseq_sqltree_Sqltree_parse(JNIEnv *env, jclass cls, jlong h,
                                  jstring sql){
   char *zSql;
   char *zRes;
@@ -2264,7 +2264,7 @@ Java_parseq_native_Sqltree_parse(JNIEnv *env, jclass cls, jlong h,
 }
 
 JNIEXPORT jstring JNICALL
-Java_parseq_native_Sqltree_loadSchema(JNIEnv *env, jclass cls, jlong h,
+Java_parseq_sqltree_Sqltree_loadSchema(JNIEnv *env, jclass cls, jlong h,
                                       jstring ddl){
   char *zDdl;
   char *zRes;
