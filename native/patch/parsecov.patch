@@ -199,14 +199,14 @@
    assert( db->mallocFailed==0 );
    assert( p->pEList!=0 );
  #if TREETRACE_ENABLED
-@@ -159213,6 +159239,7 @@
+@@ -159212,6 +159238,7 @@
+   Token nameToken;                        /* Trigger name for error reporting */
    i64 n;                                  /* Number of steps */
  
-   pParse->pNewTrigger = 0;
 +  if( sqltreeFinishTrigger(pParse, pStepList, pAll) ) return;
+   pParse->pNewTrigger = 0;
    if( NEVER(pParse->nErr) || !pTrig ) goto triggerfinish_cleanup;
    zName = pTrig->zName;
-   iDb = sqlite3SchemaToIndex(pParse->db, pTrig->pSchema);
 @@ -159540,6 +159567,7 @@
  ** instead of the trigger name.
  **/
