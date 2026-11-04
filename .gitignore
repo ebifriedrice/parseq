@@ -30,4 +30,6 @@
 native/vendor/sqlite-amalgamation-*/
 native/build/
 
-native/build-asan/
+hs_err_pid*.log
+core.*
+native/build-*/
