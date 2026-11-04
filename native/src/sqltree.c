@@ -1298,6 +1298,9 @@ int sqltreeStmtFinish(Parse *pParse){
   if( pParse->nErr==0 ){
     sqtEmitStatement(c, zEnd);
   }
+  /* EXPLAIN prefixes exactly one statement; a fresh sqlite3_prepare of
+  ** the tail would start a new Parse, so clear it here to match */
+  pParse->explain = 0;
   c->zStmtStart = sqtNextStmtStart(zEnd, c->zSql + strlen(c->zSql));
   return 1;   /* skip all of sqlite3FinishCoding */
 }
