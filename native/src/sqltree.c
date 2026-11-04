@@ -29,6 +29,16 @@ typedef struct SqtSession {
   sqlite3 *db;
 } SqtSession;
 
+/* Constant rows 2..N of a multi-row VALUES clause are code-generated
+** and freed inside sqlite3MultiValues before any dump can see them;
+** sqltreeValuesRow serializes each into one of these buckets keyed by
+** the co-routine body select they belong to. */
+typedef struct SqtValuesExtra {
+  Select *pBody;
+  sqlite3_str *rows;        /* pre-serialized " [..] [..]" row items */
+  struct SqtValuesExtra *pNext;
+} SqtValuesExtra;
+
 typedef struct SqtCtx {
   Parse *pParse;
   sqlite3_str *out;         /* completed statement envelopes */
@@ -37,6 +47,7 @@ typedef struct SqtCtx {
   const char *zStmtStart;   /* start of current statement */
   int hasNode;              /* a verb hook dumped the current statement */
   int depth;                /* tree recursion guard */
+  SqtValuesExtra *pValues;  /* captured VALUES rows for this statement */
 } SqtCtx;
 
 static SqtCtx *g_ctx = 0;
@@ -187,7 +198,14 @@ static const char *sqtSchemaDbName(sqlite3 *db, Schema *pSchema){
 static void sqtExpr(SqtCtx *c, const Expr *p);
 static void sqtExprList(SqtCtx *c, const ExprList *p);
 static void sqtSelect(SqtCtx *c, const Select *p);
-static void sqtTableDef(SqtCtx *c, const Table *p);
+typedef struct SqtTableExtras {
+  Expr **apDflt;    /* [nCol] resolved copies, NULL where no default */
+  Expr **apCheck;   /* [nCheck] resolved copies */
+  int nCol;
+  int nCheck;
+} SqtTableExtras;
+
+static void sqtTableDef(SqtCtx *c, const Table *p, const SqtTableExtras *x);
 struct SqtStepView;
 static void sqtDumpTriggerBody(SqtCtx*, const Trigger*, const Table*,
                                const TriggerStep*, const struct SqtStepView*,
@@ -258,7 +276,12 @@ static void sqtExpr(SqtCtx *c, const Expr *p){
           if( zDb ) sqtKStr(o, "schema", zDb);
         }
         if( p->iColumn<0 ){
-          sqtKKw(o, "name", "rowid");
+          if( pTab->iPKey>=0 && pTab->iPKey<pTab->nCol ){
+            sqtKStr(o, "name", pTab->aCol[pTab->iPKey].zCnName);
+            sqtKBool(o, "rowid", 1);
+          }else{
+            sqtKKw(o, "name", "rowid");
+          }
           sqtKInt(o, "idx", -1);
         }else if( p->iColumn<pTab->nCol ){
           const Column *pCol = &pTab->aCol[p->iColumn];
@@ -712,8 +735,11 @@ static void sqtWith(SqtCtx *c, const With *p){
 /* FROM clause (SrcList)                                              */
 /* ------------------------------------------------------------------ */
 
-/* resolved column list of a table; used for FROM items and targets */
-static void sqtColumnsOf(SqtCtx *c, const Table *pTab, int skipNoExpand){
+/* resolved column list of a table; used for FROM items and targets.
+** When x supplies resolved DEFAULT/AS copies they are dumped instead
+** of the stored (possibly reduced) originals. */
+static void sqtColumnsOf(SqtCtx *c, const Table *pTab, int skipNoExpand,
+                         const SqtTableExtras *x){
   sqlite3_str *o = c->node;
   int i;
   sqtKey(o, "columns"); sqtVec(o);
@@ -742,6 +768,7 @@ static void sqtColumnsOf(SqtCtx *c, const Table *pTab, int skipNoExpand){
     }
     {
       Expr *pDflt = sqlite3ColumnExpr((Table*)pTab, (Column*)pCol);
+      if( x && x->apDflt && x->apDflt[i] ) pDflt = x->apDflt[i];
       if( pDflt ){
         if( pCol->colFlags & COLFLAG_GENERATED ){
           sqtKey(o, "as-expr"); sqtExpr(c, pDflt);
@@ -772,7 +799,7 @@ static void sqtSrcItem(SqtCtx *c, const SrcItem *pItem, int iItem){
       if( pItem->pSTab && pItem->pSTab->zName ){
         sqtKStr(o, "table", pItem->pSTab->zName);
       }
-      if( pItem->pSTab ) sqtColumnsOf(c, pItem->pSTab, 1);
+      if( pItem->pSTab ) sqtColumnsOf(c, pItem->pSTab, 1, 0);
       sqtKey(o, "select"); c->depth--; sqtSelect(c, ps); c->depth++;
     }
   }else if( pItem->fg.isTabFunc ){
@@ -787,7 +814,8 @@ static void sqtSrcItem(SqtCtx *c, const SrcItem *pItem, int iItem){
     }
   }else{
     sqtKKw(o, "node", "table");
-    if( pItem->u4.zDatabase && pItem->u4.zDatabase[0] ){
+    if( pItem->u4.zDatabase && pItem->u4.zDatabase[0]
+     && (pItem->pSTab==0 || pItem->pSTab->pSchema==0) ){
       sqtKStr(o, "schema", pItem->u4.zDatabase);
     }
     if( pItem->zName ) sqtKStr(o, "name", pItem->zName);
@@ -796,11 +824,13 @@ static void sqtSrcItem(SqtCtx *c, const SrcItem *pItem, int iItem){
     if( pItem->fg.isCte ) sqtKBool(o, "cte", 1);
     if( pItem->pSTab ){
       if( IsVirtual(pItem->pSTab) ) sqtKBool(o, "virtual-table", 1);
+      /* :schema may already hold the qualifier the user wrote; the
+      ** resolved schema is authoritative, so replace it */
       if( pItem->pSTab->pSchema && c->pParse->db ){
         const char *zDb = sqtSchemaDbName(c->pParse->db, pItem->pSTab->pSchema);
         if( zDb ) sqtKStr(o, "schema", zDb);
       }
-      sqtColumnsOf(c, pItem->pSTab, 1);
+      sqtColumnsOf(c, pItem->pSTab, 1, 0);
     }
     if( pItem->fg.notIndexed ) sqtKBool(o, "not-indexed", 1);
     if( pItem->fg.isIndexedBy && pItem->u1.zIndexedBy ){
@@ -907,7 +937,9 @@ static void sqtSelect(SqtCtx *c, const Select *p){
   c->depth++;
 
   /* VALUES (...), (...) are linked through pPrior with SF_MultiValue;
-  ** surface them as an explicit :values node with all rows. */
+  ** surface them as an explicit :values node with all rows. Constant
+  ** rows beyond the first live only in captured buckets (see
+  ** SqtValuesExtra) because sqlite frees them at parse time. */
   if( (p->selFlags & SF_Values)!=0 ){
     const Select *pt;
     int n = 0;
@@ -934,6 +966,15 @@ static void sqtSelect(SqtCtx *c, const Select *p){
           }
         }
         sqlite3StackFree(c->pParse->db, (void*)ap);
+      }
+    }
+    {   /* rows sqlite folded into the co-routine and freed at parse time */
+      const SqtValuesExtra *px;
+      for(px=c->pValues; px; px=px->pNext){
+        if( px->pBody==p && px->rows ){
+          const char *z = sqlite3_str_value(px->rows);
+          if( z && z[0] ) sqlite3_str_appendall(o, z);
+        }
       }
     }
     sqtVecEnd(o);
@@ -1062,7 +1103,7 @@ static void sqtForeignKey(SqtCtx *c, const FKey *pFk){
   sqtMapEnd(o);
 }
 
-static void sqtTableDef(SqtCtx *c, const Table *p){
+static void sqtTableDef(SqtCtx *c, const Table *p, const SqtTableExtras *x){
   sqlite3_str *o = c->node;
   sqtMap(o);
   sqtKKw(o, "node", "table");
@@ -1077,7 +1118,7 @@ static void sqtTableDef(SqtCtx *c, const Table *p){
   if( p->iPKey>=0 && p->iPKey<p->nCol ){
     sqtKStr(o, "rowid-alias", p->aCol[p->iPKey].zCnName);
   }
-  sqtColumnsOf(c, p, 0);
+  sqtColumnsOf(c, p, 0, x);
   if( IsOrdinaryTable(p) && p->pCheck && p->pCheck->nExpr ){
     int i;
     sqtKey(o, "checks"); sqtVec(o);
@@ -1091,6 +1132,7 @@ static void sqtTableDef(SqtCtx *c, const Table *p){
         if( pe && pe->op==TK_SPAN && ExprUseUToken(pe) && pe->u.zToken ){
           sqtKStr(o, "span", pe->u.zToken);
         }
+        if( x && x->apCheck && x->apCheck[i] ) pe = x->apCheck[i];
         sqtKey(o, "expr"); sqtExpr(c, pe);
       }
       sqtMapEnd(o);
@@ -1174,28 +1216,52 @@ static int sqtResolveExprList(SqtCtx *c, ExprList *pList, SrcList *pSrc,
   return 0;
 }
 
-/* Resolve exprs attached to a table's DEFAULT/AS/CHECK parts so the
-** dump can show resolved column references inside them. */
-static void sqtResolveTableExprs(SqtCtx *c, Table *pTab){
-  int i;
+/* Column DEFAULT / GENERATED-AS exprs and CHECK constraints are stored
+** as EXPRDUP_REDUCE-packed duplicates (nodes truncated at Expr.iTable),
+** so they cannot be resolved in place. Build full-size, resolved copies
+** for the dump; the stored originals stay untouched. */
+static void sqtBuildTableExtras(SqtCtx *c, Table *pTab, SqtTableExtras *x){
+  sqlite3 *db = c->pParse->db;
   SrcList *pSrc;
+  int i;
+  memset(x, 0, sizeof(*x));
   if( !IsOrdinaryTable(pTab) ) return;
   pSrc = sqtFakeSrc(c, pTab);
   if( pSrc==0 ) return;
+  x->nCol = pTab->nCol;
+  x->apDflt = (Expr**)sqlite3DbMallocZero(db, pTab->nCol*sizeof(Expr*));
   for(i=0;i<pTab->nCol;i++){
     Expr *pE = sqlite3ColumnExpr(pTab, &pTab->aCol[i]);
-    while( pE && pE->op==TK_SPAN && pE->pLeft ) pE = pE->pLeft;
-    if( pE ) sqtResolveExpr(c, &pE, pSrc, NC_GenCol);
+    if( pE==0 ) continue;
+    x->apDflt[i] = sqlite3ExprDup(db, pE, 0);
+    if( x->apDflt[i] ){
+      sqtResolveExpr(c, &x->apDflt[i], pSrc, NC_GenCol);
+    }
   }
-  if( pTab->pCheck ){
-    int j;
-    for(j=0;j<pTab->pCheck->nExpr;j++){
-      Expr *pE = pTab->pCheck->a[j].pExpr;
-      while( pE && pE->op==TK_SPAN && pE->pLeft ) pE = pE->pLeft;
-      if( pE ) sqtResolveExpr(c, &pE, pSrc, NC_IsCheck);
+  if( pTab->pCheck && pTab->pCheck->nExpr ){
+    x->nCheck = pTab->pCheck->nExpr;
+    x->apCheck = (Expr**)sqlite3DbMallocZero(db, x->nCheck*sizeof(Expr*));
+    for(i=0;i<x->nCheck;i++){
+      x->apCheck[i] = sqlite3ExprDup(db, pTab->pCheck->a[i].pExpr, 0);
+      if( x->apCheck[i] ){
+        sqtResolveExpr(c, &x->apCheck[i], pSrc, NC_IsCheck);
+      }
     }
   }
   sqtFreeSrc(c, pSrc);
+}
+
+static void sqtFreeTableExtras(sqlite3 *db, SqtTableExtras *x){
+  int i;
+  if( x->apDflt ){
+    for(i=0;i<x->nCol;i++) sqlite3ExprDelete(db, x->apDflt[i]);
+    sqlite3DbFree(db, x->apDflt);
+  }
+  if( x->apCheck ){
+    for(i=0;i<x->nCheck;i++) sqlite3ExprDelete(db, x->apCheck[i]);
+    sqlite3DbFree(db, x->apCheck);
+  }
+  memset(x, 0, sizeof(*x));
 }
 
 /* ------------------------------------------------------------------ */
@@ -1213,6 +1279,7 @@ static void sqtBeginStmtMap(SqtCtx *c, const char *kind){
 static void sqtReturning(SqtCtx *c){
   Parse *pParse = c->pParse;
   Returning *pRet;
+  if( pParse->bReturning==0 ) return;   /* u1 may hold cr.* garbage */
   pRet = pParse->u1.d.pReturning;
   if( pRet && pRet->pReturnEL && pRet->pReturnEL->nExpr ){
     int i;
@@ -1230,6 +1297,7 @@ static void sqtReturning(SqtCtx *c){
 static void sqtResolveReturning(SqtCtx *c, SrcList *pSrc){
   Parse *pParse = c->pParse;
   Returning *pRet;
+  if( pParse->bReturning==0 ) return;   /* u1 may hold cr.* garbage */
   pRet = pParse->u1.d.pReturning;
   if( pRet && pRet->pReturnEL ){
     int i;
@@ -1302,7 +1370,50 @@ int sqltreeStmtFinish(Parse *pParse){
   ** the tail would start a new Parse, so clear it here to match */
   pParse->explain = 0;
   c->zStmtStart = sqtNextStmtStart(zEnd, c->zSql + strlen(c->zSql));
+  while( c->pValues ){
+    SqtValuesExtra *pNext = c->pValues->pNext;
+    sqlite3_str_free(c->pValues->rows);
+    sqlite3DbFree(pParse->db, c->pValues);
+    c->pValues = pNext;
+  }
   return 1;   /* skip all of sqlite3FinishCoding */
+}
+
+int sqltreeValuesRow(Parse *pParse, Select *pValuesSelect, ExprList *pRow){
+  SqtCtx *c = sqtCtx(pParse);
+  SqtValuesExtra *px;
+  Select *pBody;
+  if( c==0 || pRow==0 ) return 0;
+  /* sqlite3MultiValues hands us the outer select; the :values node the
+  ** dump emits is the co-routine body inside its FROM item */
+  pBody = pValuesSelect;
+  if( pBody && pBody->pSrc && pBody->pSrc->nSrc>0
+   && pBody->pSrc->a[0].fg.isSubquery
+   && pBody->pSrc->a[0].u4.pSubq ){
+    pBody = pBody->pSrc->a[0].u4.pSubq->pSelect;
+  }
+  for(px=c->pValues; px; px=px->pNext){
+    if( px->pBody==pBody ) break;
+  }
+  if( px==0 ){
+    px = (SqtValuesExtra*)sqlite3DbMallocRaw(pParse->db, sizeof(*px));
+    if( px==0 ) return 0;
+    px->pBody = pBody;
+    px->rows = sqlite3_str_new(pParse->db);
+    px->pNext = c->pValues;
+    c->pValues = px;
+  }
+  sqlite3_str_appendchar(px->rows, 1, ' ');
+  sqtVec(px->rows);
+  /* save/restore the node buffer: sqtExprList writes into c->node */
+  {
+    sqlite3_str *save = c->node;
+    c->node = px->rows;
+    sqtExprList(c, pRow);
+    c->node = save;
+  }
+  sqtVecEnd(px->rows);
+  return 0;   /* never take over: sqlite3MultiValues must still run */
 }
 
 int sqltreeSelect(Parse *pParse, Select *p){
@@ -1378,12 +1489,24 @@ int sqltreeInsert(Parse *pParse, SrcList *pTabList, Select *pSelect,
         if( pSrc ) sqtFreeSrc(c, pSrc);
       }
       if( pu->pUpsertSet ){
-        sqtResolveExprList(c, (ExprList*)pu->pUpsertSet, pTabList, 0);
+        ExprList *pl = (ExprList*)pu->pUpsertSet;
+        int k;
+        sqtResolveExprList(c, pl, pTabList, 0);
         if( pu->pUpsertWhere ){
           sqtResolveExpr(c, (Expr**)&pu->pUpsertWhere, pTabList, 0);
         }
         sqtKey(o, "set"); sqtVec(o);
-        sqtExprList(c, pu->pUpsertSet);
+        for(k=0;k<pl->nExpr;k++){
+          if( k ) sqtSep(o);
+          sqtMap(o);
+          sqtKStr(o, "column", pl->a[k].zEName);
+          if( pTab ){
+            int ix = sqlite3ColumnIndex(pTab, pl->a[k].zEName);
+            if( ix>=0 ) sqtKInt(o, "idx", ix);
+          }
+          sqtKey(o, "expr"); sqtExpr(c, pl->a[k].pExpr);
+          sqtMapEnd(o);
+        }
         sqtVecEnd(o);
         if( pu->pUpsertWhere ){
           sqtKey(o, "where"); sqtExpr(c, pu->pUpsertWhere);
@@ -1498,6 +1621,7 @@ int sqltreeEndTable(Parse *pParse, u32 tabOpts, Select *pSelect){
   SqtCtx *c = sqtCtx(pParse);
   sqlite3_str *o;
   Table *pTab;
+  SqtTableExtras x;
   if( c==0 ) return 0;
   o = c->node;
   pTab = pParse->pNewTable;
@@ -1507,16 +1631,20 @@ int sqltreeEndTable(Parse *pParse, u32 tabOpts, Select *pSelect){
   if( pSelect ){
     int bad = sqtResolveSelect(c, pSelect);
     sqtBeginStmtMap(c, "create-table-as-select");
-    sqtTableDef(c, pTab);
+    sqtBuildTableExtras(c, pTab, &x);
+    sqtKey(o, "table"); sqtTableDef(c, pTab, &x);
     /* columns for CTAS come from the select */
     sqtKey(o, "query"); c->depth--; sqtSelect(c, pSelect); c->depth++;
     if( bad ) sqtKBool(o, "resolve-error", 1);
+    sqtMapEnd(o);
+    sqtFreeTableExtras(pParse->db, &x);
   }else{
-    sqtResolveTableExprs(c, pTab);
     sqtBeginStmtMap(c, "create-table");
-    sqtTableDef(c, pTab);
+    sqtBuildTableExtras(c, pTab, &x);
+    sqtKey(o, "table"); sqtTableDef(c, pTab, &x);
+    sqtMapEnd(o);
+    sqtFreeTableExtras(pParse->db, &x);
   }
-  sqtMapEnd(o);
   return 1;
 }
 
@@ -1570,13 +1698,19 @@ int sqltreeCreateIndex(Parse *pParse, Token *pName1, Token *pName2,
         sqtKKw(o, "nulls",
                (it->fg.sortFlags & KEYINFO_ORDER_BIGNULL) ? "first" : "last");
       }
-      /* map bare column references to column idx */
-      if( it->pExpr && it->pExpr->op==TK_COLUMN && pTab ){
-        if( it->pExpr->iColumn<0 ){
-          sqtKKw(o, "column", "rowid");
-        }else if( it->pExpr->iColumn<pTab->nCol ){
-          sqtKStr(o, "column", pTab->aCol[it->pExpr->iColumn].zCnName);
-          sqtKInt(o, "idx", it->pExpr->iColumn);
+      /* map column references (unwrap COLLATE wrappers) to idx */
+      if( it->pExpr && pTab ){
+        const Expr *pe = it->pExpr;
+        while( pe && pe->op==TK_COLLATE && !ExprHasProperty(pe, EP_TokenOnly) ){
+          pe = pe->pLeft;
+        }
+        if( pe && pe->op==TK_COLUMN ){
+          if( pe->iColumn<0 ){
+            sqtKKw(o, "column", "rowid");
+          }else if( pe->iColumn<pTab->nCol ){
+            sqtKStr(o, "column", pTab->aCol[pe->iColumn].zCnName);
+            sqtKInt(o, "idx", pe->iColumn);
+          }
         }
       }
       sqtMapEnd(o);
@@ -2054,10 +2188,13 @@ int sqltreeAlterFinishAddColumn(Parse *pParse, Token *pColDef){
   Table *pNew = pParse->pNewTable;
   if( c==0 ) return 0;
   if( pNew==0 || pNew->nCol==0 ) return 0;
+  SqtTableExtras x;
   sqtBeginStmtMap(c, "add-column");
   /* pNewTable is the working copy of the table including the new column */
+  sqtBuildTableExtras(c, pNew, &x);
   sqtKey(c->node, "table");
-  sqtTableDef(c, pNew);
+  sqtTableDef(c, pNew, &x);
+  sqtFreeTableExtras(c->pParse->db, &x);
   sqtKTok(c->node, "definition", pColDef);
   sqtMapEnd(c->node);
   return 1;
@@ -2136,6 +2273,13 @@ SQT_API char *sqt_parse(void *h, const char *zSql){
 
   memset(PARSE_HDR(&sParse), 0, PARSE_HDR_SZ);
   memset(PARSE_TAIL(&sParse), 0, PARSE_TAIL_SZ);
+  /* The middle of Parse (aTempReg..sLastToken) is deliberately not
+  ** initialized by sqlite3Prepare: stock sqlite sets every field it
+  ** reads before reading it. Our hooks additionally read
+  ** u1.d.pReturning from DML paths, so clear that arm explicitly -
+  ** on a C driver's stack it happens to be zero, on a JVM FFM
+  ** downcall stack it is JIT garbage and the read crashes. */
+  sParse.u1.d.pReturning = 0;
   sParse.pOuterParse = db->pParse;
   db->pParse = &sParse;
   sParse.db = db;
@@ -2147,12 +2291,22 @@ SQT_API char *sqt_parse(void *h, const char *zSql){
   ctx.zStmtStart = zSql;
   ctx.hasNode = 0;
   ctx.depth = 0;
+  ctx.pValues = 0;
   g_ctx = &ctx;
+  if( getenv("SQT_TRACE") ){
+    fprintf(stderr, "[sqt] parse: %.120s\n", zSql);
+  }
 
   sqlite3ReadSchema(&sParse);
   sqlite3RunParser(&sParse, zSql);
 
   g_ctx = 0;
+  while( ctx.pValues ){
+    SqtValuesExtra *pNext = ctx.pValues->pNext;
+    sqlite3_str_free(ctx.pValues->rows);
+    sqlite3DbFree(db, ctx.pValues);
+    ctx.pValues = pNext;
+  }
 
   if( sParse.nErr || sParse.zErrMsg || sParse.rc!=SQLITE_OK ){
     /* the failing statement never reaches FinishCoding; emit it as an
