@@ -30,3 +30,4 @@
 native/vendor/sqlite-amalgamation-*/
 native/build/
 
+native/build-asan/
