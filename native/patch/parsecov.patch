@@ -1,0 +1,233 @@
+--- sqlite3.c
++++ sqlite3.c
+@@ -120838,11 +120838,14 @@
+ ** Generate code to implement the "ALTER TABLE xxx RENAME TO yyy"
+ ** command.
+ */
++#include "sqltree_hooks.h"
++
+ SQLITE_PRIVATE void sqlite3AlterRenameTable(
+   Parse *pParse,            /* Parser context. */
+   SrcList *pSrc,            /* The table to rename. */
+   Token *pName              /* The new table name. */
+ ){
++  if( sqltreeRenameTable(pParse, pSrc, pName) ) return;
+   int iDb;                  /* Database that contains the table */
+   char *zDb;                /* Name of database iDb */
+   Table *pTab;              /* Table being renamed */
+@@ -121052,6 +121055,7 @@
+ ** the new column during parsing.
+ */
+ SQLITE_PRIVATE void sqlite3AlterFinishAddColumn(Parse *pParse, Token *pColDef){
++  if( sqltreeAlterFinishAddColumn(pParse, pColDef) ) return;
+   Table *pNew;              /* Copy of pParse->pNewTable */
+   Table *pTab;              /* Table being altered */
+   int iDb;                  /* Database number */
+@@ -121345,6 +121349,7 @@
+   Token *pOld,                    /* Name of column being changed */
+   Token *pNew                     /* New column name */
+ ){
++  if( sqltreeRenameColumn(pParse, pSrc, pOld, pNew) ) return;
+   sqlite3 *db = pParse->db;       /* Database connection */
+   Table *pTab;                    /* Table being updated */
+   int iCol;                       /* Index of column being renamed */
+@@ -122993,6 +122998,7 @@
+ ** table being edited, and token pName the name of the column to drop.
+ */
+ SQLITE_PRIVATE void sqlite3AlterDropColumn(Parse *pParse, SrcList *pSrc, const Token *pName){
++  if( sqltreeAlterDropColumn(pParse, pSrc, pName) ) return;
+   sqlite3 *db = pParse->db;       /* Database handle */
+   Table *pTab;                    /* Table to modify */
+   int iDb;                        /* Index of db containing pTab in aDb[] */
+@@ -123551,6 +123557,7 @@
+   Token *pCons,     /* Name of the constraint to drop */
+   Token *pCol       /* Name of the column from which to remove the NOT NULL */
+ ){
++  if( sqltreeAlterDropConstraint(pParse, pSrc, pCons, pCol) ) return;
+   sqlite3 *db = pParse->db;
+   Table *pTab = 0;
+   int iDb = 0;
+@@ -123651,6 +123658,7 @@
+   Token *pCol,     /* Name of the column to add a NOT NULL constraint to */
+   Token *pFirst    /* The NOT token of the NOT NULL constraint text */
+ ){
++  if( sqltreeAlterSetNotNull(pParse, pSrc, pCol, pFirst) ) return;
+   Table *pTab = 0;
+   int iCol = 0;
+   int iDb = 0;
+@@ -123756,6 +123764,7 @@
+   int nExpr,               /* Size of pExpr in bytes */
+   Expr *pExpr              /* The parsed CHECK expression */
+ ){
++  if( sqltreeAlterAddConstraint(pParse, pSrc, pFirst, pName, zExpr, nExpr, pExpr) ) return;
+   Table *pTab = 0;         /* Table identified by pSrc */
+   int iDb = 0;             /* Which schema does pTab live in */
+   const char *zDb = 0;     /* Name of the schema in which pTab lives */
+@@ -125293,6 +125302,7 @@
+ ** Form 3 analyzes all indices associated with the named table.
+ */
+ SQLITE_PRIVATE void sqlite3Analyze(Parse *pParse, Token *pName1, Token *pName2){
++  if( sqltreeAnalyze(pParse, pName1, pName2) ) return;
+   sqlite3 *db = pParse->db;
+   int iDb;
+   int i;
+@@ -126292,6 +126302,7 @@
+ **     DETACH pDbname
+ */
+ SQLITE_PRIVATE void sqlite3Detach(Parse *pParse, Expr *pDbname){
++  if( sqltreeDetach(pParse, pDbname) ) return;
+   static const FuncDef detach_func = {
+     1,                /* nArg */
+     SQLITE_UTF8,      /* funcFlags */
+@@ -126312,6 +126323,7 @@
+ **     ATTACH p AS pDbname KEY pKey
+ */
+ SQLITE_PRIVATE void sqlite3Attach(Parse *pParse, Expr *p, Expr *pDbname, Expr *pKey){
++  if( sqltreeAttach(pParse, p, pDbname, pKey) ) return;
+   static const FuncDef attach_func = {
+     3,                /* nArg */
+     SQLITE_UTF8,      /* funcFlags */
+@@ -126925,6 +126937,7 @@
+   Vdbe *v;
+   int iDb, i;
+ 
++  if( sqltreeStmtFinish(pParse) ) return;
+   assert( pParse->pToplevel==0 );
+   db = pParse->db;
+   assert( db->pParse==pParse );
+@@ -129512,6 +129525,7 @@
+   }
+   p = pParse->pNewTable;
+   if( p==0 ) return;
++  if( sqltreeEndTable(pParse, tabOpts, pSelect) ) return;
+ 
+   if( pSelect==0 && sqlite3ShadowTableName(db, p->zName) ){
+     p->tabFlags |= TF_Shadow;
+@@ -129858,6 +129872,7 @@
+   int isTemp,        /* TRUE for a TEMPORARY view */
+   int noErr          /* Suppress error messages if VIEW already exists */
+ ){
++  if( sqltreeCreateView(pParse, pName1, pName2, pCNames, pSelect, isTemp, noErr) ) return;
+   Table *p;
+   int n;
+   const char *z;
+@@ -130354,6 +130369,7 @@
+ ** pName is the name of the table to be dropped.
+ */
+ SQLITE_PRIVATE void sqlite3DropTable(Parse *pParse, SrcList *pName, int isView, int noErr){
++  if( sqltreeDropTable(pParse, pName, isView, noErr) ) return;
+   Table *pTab;
+   Vdbe *v;
+   sqlite3 *db = pParse->db;
+@@ -130812,6 +130828,7 @@
+   int ifNotExist,    /* Omit error if index already exists */
+   u8 idxType         /* The index type */
+ ){
++  if( pParse->pNewTable==0 && sqltreeCreateIndex(pParse, pName1, pName2, pTblName, pList, onError, pStart, pPIWhere, sortOrder, ifNotExist, idxType) ) return;
+   Table *pTab = 0;     /* Table to be indexed */
+   Index *pIndex = 0;   /* The index to be created */
+   char *zName = 0;     /* Name of the index */
+@@ -131455,6 +131472,7 @@
+ ** implements the DROP INDEX statement.
+ */
+ SQLITE_PRIVATE void sqlite3DropIndex(Parse *pParse, SrcList *pName, int ifExists){
++  if( sqltreeDropIndex(pParse, pName, ifExists) ) return;
+   Index *pIndex;
+   Vdbe *v;
+   sqlite3 *db = pParse->db;
+@@ -132105,6 +132123,7 @@
+ ** Generate VDBE code for a BEGIN statement.
+ */
+ SQLITE_PRIVATE void sqlite3BeginTransaction(Parse *pParse, int type){
++  if( sqltreeBeginTxn(pParse, type) ) return;
+   sqlite3 *db;
+   Vdbe *v;
+   int i;
+@@ -132141,6 +132160,7 @@
+ ** code is generated for a COMMIT.
+ */
+ SQLITE_PRIVATE void sqlite3EndTransaction(Parse *pParse, int eType){
++  if( sqltreeEndTxn(pParse, eType) ) return;
+   Vdbe *v;
+   int isRollback;
+ 
+@@ -132163,6 +132183,7 @@
+ ** release or rollback an SQL savepoint.
+ */
+ SQLITE_PRIVATE void sqlite3Savepoint(Parse *pParse, int op, Token *pName){
++  if( sqltreeSavepoint(pParse, op, pName) ) return;
+   char *zName = sqlite3NameFromToken(pParse->db, pName);
+   if( zName ){
+     Vdbe *v = sqlite3GetVdbe(pParse);
+@@ -132424,6 +132445,7 @@
+ */
+ #ifndef SQLITE_OMIT_REINDEX
+ SQLITE_PRIVATE void sqlite3Reindex(Parse *pParse, Token *pName1, Token *pName2){
++  if( sqltreeReindex(pParse, pName1, pName2) ) return;
+   char *z = 0;                /* Name of a table or index or collation */
+   const char *zDb = 0;        /* Name of the database */
+   int iReDb = -1;             /* The database index number */
+@@ -133518,6 +133540,7 @@
+   ExprList *pOrderBy,    /* ORDER BY clause. May be null */
+   Expr *pLimit           /* LIMIT clause. May be null */
+ ){
++  if( sqltreeDelete(pParse, pTabList, pWhere, pOrderBy, pLimit) ) return;
+   Vdbe *v;               /* The virtual database engine */
+   Table *pTab;           /* The table from which records will be deleted */
+   int i;                 /* Loop counter */
+@@ -140225,6 +140248,7 @@
+   int onError,          /* How to handle constraint errors */
+   Upsert *pUpsert       /* ON CONFLICT clauses for upsert, or NULL */
+ ){
++  if( sqltreeInsert(pParse, pTabList, pSelect, pColumn, onError, pUpsert) ) return;
+   sqlite3 *db;          /* The main database structure */
+   Table *pTab;          /* The table to insert into.  aka TABLE */
+   int i, j;             /* Loop counters */
+@@ -145745,6 +145769,7 @@
+   Token *pValue,      /* Token for <value>, or NULL */
+   int minusFlag       /* True if a '-' sign preceded <value> */
+ ){
++  if( sqltreePragma(pParse, pId1, pId2, pValue, minusFlag) ) return;
+   char *zLeft = 0;       /* Nul-terminated UTF-8 string <id> */
+   char *zRight = 0;      /* Nul-terminated UTF-8 string <value>, or NULL */
+   const char *zDb = 0;   /* The database name */
+@@ -157354,6 +157379,7 @@
+   if( pParse->nErr ){
+     goto select_end;
+   }
++  if( sqltreeSelect(pParse, p) ) goto select_end;
+   assert( db->mallocFailed==0 );
+   assert( p->pEList!=0 );
+ #if TREETRACE_ENABLED
+@@ -159213,6 +159239,7 @@
+   i64 n;                                  /* Number of steps */
+ 
+   pParse->pNewTrigger = 0;
++  if( sqltreeFinishTrigger(pParse, pStepList, pAll) ) return;
+   if( NEVER(pParse->nErr) || !pTrig ) goto triggerfinish_cleanup;
+   zName = pTrig->zName;
+   iDb = sqlite3SchemaToIndex(pParse->db, pTrig->pSchema);
+@@ -159540,6 +159567,7 @@
+ ** instead of the trigger name.
+ **/
+ SQLITE_PRIVATE void sqlite3DropTrigger(Parse *pParse, SrcList *pName, int noErr){
++  if( sqltreeDropTrigger(pParse, pName, noErr) ) return;
+   Trigger *pTrigger = 0;
+   int i;
+   const char *zDb;
+@@ -160765,6 +160793,7 @@
+   Expr *pLimit,          /* LIMIT clause. May be null */
+   Upsert *pUpsert        /* ON CONFLICT clause, or null */
+ ){
++  if( sqltreeUpdate(pParse, pTabList, pChanges, pWhere, onError, pOrderBy, pLimit, pUpsert) ) return;
+   int i, j, k;           /* Loop counters */
+   Table *pTab;           /* The table to be updated */
+   int addrTop = 0;       /* VDBE instruction address of the start of the loop */
+@@ -162275,6 +162304,7 @@
+ ** following reboot.
+ */
+ SQLITE_PRIVATE void sqlite3Vacuum(Parse *pParse, Token *pNm, Expr *pInto){
++  if( sqltreeVacuum(pParse, pNm, pInto) ) return;
+   Vdbe *v = sqlite3GetVdbe(pParse);
+   int iDb = 0;
+   if( v==0 ) goto build_vacuum_end;
