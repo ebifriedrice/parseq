@@ -1,9 +1,9 @@
 # parseq
 
 Unambiguous, fully-resolved syntax trees for SQLite SQL — built on
-SQLite's own parser, exposed to Clojure through both JNI and Panama
-(FFM) bindings, with a JDBC bridge that resolves against a live
-database's schema.
+SQLite's own parser and name resolver, exposed to Clojure through
+both JNI and Panama (FFM) bindings, and resolved against a live
+database's schema through any JDBC connection.
 
 ```clojure
 (require '[parseq.core :as pq])
@@ -64,8 +64,6 @@ executed.
             └───────▲────────┘          └───────▲────────┘
                     └───────────┬───────────────┘
                         parseq.core (Parser, EDN in/out)
-                                │
-                        parseq.jdbc (schema replay from a JDBC Connection)
 ```
 
 - **The parser and resolver are SQLite's own.** `native/vendor/`
@@ -100,7 +98,7 @@ binding the JVM can load, FFM preferred. The SQLite sources are
 vendored in the tree, so builds are fully offline.
 
 ```sh
-clojure -T:build native   # fetch amalgamation, apply patch, build libsqltree
+clojure -T:build native   # build libsqltree from the vendored sources
 clojure -T:build javac    # compile the JNI glue class
 clojure -T:build test     # both of the above, then the full suite
 ```
@@ -122,27 +120,10 @@ clojure -T:build test     # both of the above, then the full suite
 | `(parser {:impl :panama \| :jni :path "..."})` | new explicit session; default binding is whichever loads on this JVM (FFM preferred), default path `:memory:` |
 | `(load-schema p schema)` | a `java.sql.Connection` — its `sqlite_schema` DDL is read (never written) and replayed — or a DDL string for hand-built schemas; returns `{:error "..."}` on rejection |
 | `(schema-ddl conn)` | the connection's CREATE statements, in `sqlite_schema` order |
+| `(replay-schema! p conn)` | rebuild an explicit parser's schema from a connection on a fresh session; throws on rejection |
 | `(parse p sql)` | parse one or many statements; returns the tree; never throws for bad SQL |
 | `(sqlite-version p)` | SQLite version compiled into libsqltree |
 | `(close p)` | idempotent; parser also implements `java.io.Closeable` |
-
-### parseq.jdbc
-
-```clojure
-(require '[parseq.jdbc :as pqj]
-         '[parseq.core :as pq])
-
-(with-open [parser (pqj/parser-from conn)]
-  (pq/parse parser "SELECT ..."))
-```
-
-`parser-from` replays the connection's `sqlite_schema` DDL into a
-scratch in-memory session, so parses resolve exactly what the live
-database would (views, indexes, generated columns, triggers included).
-`refresh!` re-replays after migrations; it is keyed on
-`PRAGMA schema_version` and swaps in a fresh session, because a schema
-can shrink and executed DDL cannot drop what an earlier replay created.
-The connection can be closed as soon as the parser is created.
 
 ## Tree reference (selected nodes)
 
@@ -214,7 +195,7 @@ documented so nothing surprises you:
 native/
   vendor/sqlite3.c,.h   vendored 3.54.1; .c carries the patch
   vendor/README.md      provenance: version, zip hash, re-derivation
-  patch/parsecov.patch  the 29 hooks = the delta vs upstream
+  patch/parsecov.patch  the 28 hooks = the delta vs upstream
   src/sqltree_hooks.h   hook contract
   src/sqltree.c         serializer + resolver driver + sqt_*/JNI
   src/sqltree_all.c     the single TU: amalgamation + serializer
@@ -223,8 +204,8 @@ src/parseq/
   native.clj            binding protocol + impl selection
   native/panama.clj     java.lang.foreign bindings
   native/jni.clj        JNI bindings via parseq.sqltree.Sqltree
-  core.clj              Parser, load-schema, parse, close
-  jdbc.clj              schema replay from a live connection
+  core.clj              init!/parse/refresh-schema! dynamic surface,
+                        Parser, load-schema, replay-schema!, close
 java/parseq/sqltree/    the JNI glue class
 test/parseq/            resolution suite (runs under both bindings)
 ```
