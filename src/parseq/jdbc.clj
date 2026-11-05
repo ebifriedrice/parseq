@@ -14,9 +14,7 @@
 
   The parser never connects to the database itself, so the connection
   can be closed as soon as the schema is loaded."
-  (:require [clojure.edn :as edn]
-            [parseq.core :as pq]
-            [parseq.native :as native])
+  (:require [parseq.core :as pq])
   (:import (java.sql Connection)))
 
 (defn schema-version
@@ -37,16 +35,8 @@
   (let [v (schema-version conn)]
     (if (= v (::schema-version (meta parser)))
       parser
-      ;; replay onto a fresh session: schemas can shrink, and exec'd
-      ;; DDL cannot drop what a previous replay created
-      (let [h (native/native-open (:native parser) ":memory:")]
-        (when-let [err (native/native-load-schema (:native parser) h
-                                                  (pq/schema-ddl conn))]
-          (native/native-close (:native parser) h)
-          (throw (ex-info "schema replay failed"
-                          {:error (edn/read-string err)})))
-        (pq/reset-handle! parser h)
-        (vary-meta parser assoc ::schema-version v)))))
+      (vary-meta (pq/replay-schema! parser conn)
+                 assoc ::schema-version v))))
 
 (defn parser-from
   "A parser whose schema mirrors `conn` at creation time. Use refresh!

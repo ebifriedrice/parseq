@@ -125,3 +125,17 @@
   (let [[old _] (swap-vals! (:session p) #(assoc % :handle new-h))]
     (when-some [h (:handle old)]
       (native/native-close (:native p) h))))
+
+(defn replay-schema!
+  "Replay `conn`'s schema into `parser` on a fresh native session,
+  replacing whatever it held — schemas can shrink, and exec'd DDL
+  cannot drop what an earlier replay created. Throws on a rejected
+  replay. Workhorse of refresh-schema! and parseq.jdbc/refresh!."
+  [^Parser p ^Connection conn]
+  (let [n (:native p)]
+    (let [h (native/native-open n ":memory:")]
+      (when-let [err (native/native-load-schema n h (schema-ddl conn))]
+        (native/native-close n h)
+        (throw (ex-info "schema replay failed" {:error (edn/read-string err)})))
+      (reset-handle! p h))
+    p))
