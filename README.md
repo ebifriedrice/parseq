@@ -128,7 +128,7 @@ Deploys happen only on version bumps: push a tag and CI does the
 rest.
 
 ```sh
-git tag v0.1.0 && git push github v0.1.0   # and origin, for sr.ht
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 The release workflow builds the native library on every shipped
