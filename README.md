@@ -92,9 +92,12 @@ executed.
 
 ## Building and running
 
-Requirements: JDK 21+ (FFM bindings are final in 22+), CMake ≥ 3.20,
-Ninja, a C compiler, Clojure CLI. The SQLite sources are vendored in
-the tree, so builds are fully offline.
+Requirements: CMake ≥ 3.20, Ninja, a C compiler, Clojure CLI, and a
+JVM — the JNI binding loads anywhere (its glue class is compiled at
+release 8), the FFM binding needs JDK 22+ (`--enable-native-access`;
+21 with preview flags). With no `:impl` given, parseq picks whichever
+binding the JVM can load, FFM preferred. The SQLite sources are
+vendored in the tree, so builds are fully offline.
 
 ```sh
 clojure -T:build native   # fetch amalgamation, apply patch, build libsqltree
@@ -116,7 +119,7 @@ clojure -T:build test     # both of the above, then the full suite
 | `(parse sql)` | parse against the installed parser |
 | `(refresh-schema!)` | rebuild the installed schema cache from the conn — unconditional, the explicit signal it changed |
 | `(close!)` | close the installed parser and forget the conn |
-| `(parser {:impl :panama \| :jni :path "..."})` | new explicit session (defaults: Panama, `:memory:`) |
+| `(parser {:impl :panama \| :jni :path "..."})` | new explicit session; default binding is whichever loads on this JVM (FFM preferred), default path `:memory:` |
 | `(load-schema p schema)` | a `java.sql.Connection` — its `sqlite_schema` DDL is read (never written) and replayed — or a DDL string for hand-built schemas; returns `{:error "..."}` on rejection |
 | `(schema-ddl conn)` | the connection's CREATE statements, in `sqlite_schema` order |
 | `(parse p sql)` | parse one or many statements; returns the tree; never throws for bad SQL |
