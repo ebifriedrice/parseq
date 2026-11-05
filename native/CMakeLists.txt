@@ -9,39 +9,23 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # ---------------------------------------------------------------------------
-# vendored amalgamation: fetch if missing, copy, apply parsecov.patch
+# vendored sqlite: vendor/sqlite3.c is upstream 3.54.1 with
+# patch/parsecov.patch applied; vendor/sqlite3.h is pristine upstream.
+# Nothing is downloaded and nothing is patched at build time.
 # ---------------------------------------------------------------------------
-set(SQLITE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite-amalgamation-3540100)
-if(NOT EXISTS ${SQLITE_DIR}/sqlite3.c)
-  message(STATUS "fetching sqlite amalgamation")
-  execute_process(
-    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/vendor/fetch.sh
-    RESULT_VARIABLE fetch_rc)
-  if(NOT fetch_rc EQUAL 0)
-    message(FATAL_ERROR "fetch.sh failed (${fetch_rc})")
-  endif()
-endif()
-
-set(PATCHED_C ${CMAKE_CURRENT_BINARY_DIR}/sqlite_patched.c)
-add_custom_command(
-  OUTPUT ${PATCHED_C}
-  COMMAND ${CMAKE_COMMAND} -E copy ${SQLITE_DIR}/sqlite3.c ${PATCHED_C}
-  COMMAND patch --silent ${PATCHED_C} ${CMAKE_CURRENT_SOURCE_DIR}/patch/parsecov.patch
-  COMMAND ${CMAKE_COMMAND} -E copy ${SQLITE_DIR}/sqlite3.h ${CMAKE_CURRENT_BINARY_DIR}/sqlite3.h
-  DEPENDS ${SQLITE_DIR}/sqlite3.c ${CMAKE_CURRENT_SOURCE_DIR}/patch/parsecov.patch
-  COMMENT "applying parsecov.patch to sqlite3.c")
+set(SQLITE_C ${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite3.c)
 
 # ---------------------------------------------------------------------------
-# TK_ code -> name table, generated from the patched amalgamation so it
+# TK_ code -> name table, generated from the vendored amalgamation so it
 # can never drift from the token numbering of the sqlite we build against
 # ---------------------------------------------------------------------------
 set(OPNAMES_H ${CMAKE_CURRENT_BINARY_DIR}/sqltree_opnames.h)
 add_custom_command(
   OUTPUT ${OPNAMES_H}
   COMMAND ${CMAKE_COMMAND}
-    -DIN=${PATCHED_C} -DOUT=${OPNAMES_H}
+    -DIN=${SQLITE_C} -DOUT=${OPNAMES_H}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_opnames.cmake
-  DEPENDS ${PATCHED_C}
+  DEPENDS ${SQLITE_C}
   COMMENT "generating sqltree_opnames.h")
 
 # ---------------------------------------------------------------------------
@@ -50,17 +34,15 @@ add_custom_command(
 find_package(JNI REQUIRED COMPONENTS JVM)  # just to locate jni.h via include path
 find_package(Java COMPONENTS Development REQUIRED)
 
-# sqlite_patched.c is compiled by inclusion inside sqltree_all.c; it is
-# a dependency, not its own object. Both generated inputs must force a
-# recompile of the TU.
+# vendor/sqlite3.c is compiled by inclusion inside sqltree_all.c; it is
+# a dependency, not its own object. The opnames header is generated, so
+# it must force a recompile of the TU explicitly (Ninja does not track
+# includes of files it did not compile).
 add_library(sqltree SHARED src/sqltree_all.c)
-add_dependencies(sqltree opnames_h patched_c)
-add_custom_target(patched_c DEPENDS ${PATCHED_C})
-set_source_files_properties(src/sqltree_all.c PROPERTIES
-  OBJECT_DEPENDS "${PATCHED_C};${OPNAMES_H}")
-
-# phony target so the opnames custom command always runs before compilation
 add_custom_target(opnames_h DEPENDS ${OPNAMES_H})
+add_dependencies(sqltree opnames_h)
+set_source_files_properties(src/sqltree_all.c PROPERTIES
+  OBJECT_DEPENDS "${SQLITE_C};${OPNAMES_H}")
 
 target_include_directories(sqltree PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src

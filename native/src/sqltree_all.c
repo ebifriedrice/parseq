@@ -8,8 +8,8 @@
 ** compiled together here, exactly like the amalgamation itself
 ** intends for embedders.
 **
-** sqlite_patched.c is generated at build time by copying the pristine
-** vendored amalgamation and applying native/patch/parsecov.patch.
+** vendor/sqlite3.c is the upstream amalgamation with parsecov.patch
+** applied (see native/vendor/README.md); sqlite3.h resolves next to it.
 */
-#include "sqlite_patched.c"
+#include "../vendor/sqlite3.c"
 #include "sqltree.c"

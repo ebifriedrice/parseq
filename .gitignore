@@ -27,7 +27,6 @@
 /checkouts
 /classes
 /target
-native/vendor/sqlite-amalgamation-*/
 native/build/
 
 hs_err_pid*.log
