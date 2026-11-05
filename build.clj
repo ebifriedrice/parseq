@@ -92,6 +92,10 @@
     (b/write-pom opts)
     (println "\nCopying source...")
     (b/copy-dir {:src-dirs ["resources" "src"] :target-dir class-dir})
+    ;; the test task javac'd into class-dir, then the delete above
+    ;; wiped it; recompile or the jar ships without the glue class
+    (println "\nCompiling the JNI glue class...")
+    (javac nil)
     (stage-natives)
     (println "\nBuilding JAR..." (:jar-file opts))
     (b/jar opts))
