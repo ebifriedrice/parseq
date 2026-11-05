@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  natives:
+    name: natives ${{ matrix.os-name }}/${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            os-name: linux
+            arch: amd64
+            cmake-args: -G Ninja
+            lib: native/build/libsqltree.so
+          - os: ubuntu-24.04-arm
+            os-name: linux
+            arch: arm64
+            cmake-args: -G Ninja
+            lib: native/build/libsqltree.so
+          - os: macos-15
+            os-name: macos
+            arch: arm64
+            cmake-args: -G Ninja
+            lib: native/build/libsqltree.dylib
+          - os: windows-2025
+            os-name: windows
+            arch: amd64
+            cmake-args: -A x64
+            lib: native/build/Release/sqltree.dll
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Configure
+        run: cmake -S native -B native/build ${{ matrix.cmake-args }}
+
+      - name: Build
+        run: cmake --build native/build --config Release
+
+      - name: C-level smoke test
+        run: ctest --test-dir native/build -C Release --output-on-failure
+
+      - name: Stage the library under the jar's resource layout
+        shell: bash
+        run: |
+          dest="parseq/native/${{ matrix.os-name }}/${{ matrix.arch }}"
+          mkdir -p "$dest"
+          cp -L "${{ matrix.lib }}" "$dest/$(basename "${{ matrix.lib }}")"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: natives-${{ matrix.os-name }}-${{ matrix.arch }}
+          path: parseq/native/
+
+  jar:
+    name: assemble jar
+    needs: natives
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Install the Clojure CLI
+        run: |
+          curl -fLO https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh
+          sudo bash linux-install.sh
+
+      - name: Download the per-arch native libraries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: natives-*
+          path: natives
+          merge-multiple: true
+
+      - name: Take the release version from the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: echo "PARSEQ_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Test, then build the jar with every native embedded
+        run: clojure -T:build ci
+
+      - name: The jar carries all four native targets
+        run: |
+          jar=$(ls target/net.clojars.ebifriedrice/parseq-*.jar)
+          count=$(unzip -l "$jar" | grep -c 'parseq/native/\(linux\|macos\|windows\)/')
+          echo "$jar embeds $count native libraries"
+          test "$count" -eq 4
+
+      - name: The jar loads its natives with nothing on java.library.path
+        run: |
+          jar=$(ls target/net.clojars.ebifriedrice/parseq-*.jar)
+          printf '{:deps {org.clojure/clojure {:mvn/version "1.12.6"}\n net.clojars.ebifriedrice/parseq {:local/root "%s"}}}' \
+            "$GITHUB_WORKSPACE/$jar" > smoke-deps.edn
+          clojure -Srepro -Sdeps "$(cat smoke-deps.edn)" -M \
+            -e '(require (quote [parseq.native :as n])) (println "embedded binding:" (n/default-impl))'
+
+      - name: Deploy to Clojars (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          CLOJARS_USERNAME: ebifriedrice
+          CLOJARS_PASSWORD: ${{ secrets.CLOJARS_KEY }}
+        run: clojure -T:build deploy
