@@ -4,12 +4,13 @@ package parseq.sqltree;
  * JNI surface of libsqltree. The native implementations live in
  * native/src/sqltree.c (Java_parseq_sqltree_Sqltree_*) (symbols Java_parseq_native_Sqltree_*).
  *
- * The library must be on java.library.path; loading is triggered by
- * this class so callers only depend on plain Java.
+ * Loading is triggered by this class so callers only depend on plain
+ * Java; parseq.sqltree.NativeLoader locates the library (-Dparseq.lib,
+ * java.library.path, or the copy embedded in the parseq jar).
  */
 public final class Sqltree {
   static {
-    System.loadLibrary("sqltree");
+    NativeLoader.load();
   }
 
   private Sqltree() {}

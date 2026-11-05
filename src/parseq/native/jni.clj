@@ -3,8 +3,9 @@
 
   Semantically identical to parseq.native.panama; useful where FFM is
   unavailable or undesired. Requires the Java class compiled by the
-  build task ('clojure -T:build javac') plus libsqltree on
-  java.library.path."
+  build task ('clojure -T:build javac'); the library is located by
+  parseq.sqltree.NativeLoader: -Dparseq.lib, then java.library.path,
+  then the copy embedded in the jar for this platform."
   (:require [parseq.native :as native])
   (:import (parseq.sqltree Sqltree)))
 
