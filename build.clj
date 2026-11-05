@@ -22,12 +22,16 @@
   opts)
 
 (defn javac
-  "Compile the JNI glue class parseq.native.Sqltree."
+  "Compile the JNI glue class parseq.native.Sqltree.
+
+  release 8: the glue is plain JNI (loadLibrary + native methods), so
+  keep it loadable by the old JVMs the JNI binding exists for; the
+  FFM path never loads this class."
   [opts]
   (b/javac {:src-dirs ["java"]
             :class-dir class-dir
             :basis (b/create-basis {})
-            :javac-opts ["--release" "21" "-Xlint:all"]})
+            :javac-opts ["--release" "8" "-Xlint:all,-options"]})
   opts)
 
 (defn test "Run all the tests." [opts]
