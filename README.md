@@ -67,12 +67,14 @@ executed.
                         parseq.jdbc (schema replay from a JDBC Connection)
 ```
 
-- **The parser and resolver are SQLite's own.** `native/vendor/fetch.sh`
-  downloads the pinned amalgamation (SHA3-256 verified); CMake copies
-  it and applies `parsecov.patch`, a reviewable 29-hunk diff that
-  inserts guarded hook calls at the boundary where a statement is
-  fully name-resolved but code generation has not started. Outside
-  `parse` the library behaves exactly like stock SQLite.
+- **The parser and resolver are SQLite's own.** `native/vendor/`
+  carries SQLite 3.54.1 (`sqlite3.h` byte-for-byte upstream,
+  `sqlite3.c` upstream plus `parsecov.patch` — a reviewable 29-hunk
+  diff that inserts guarded hook calls at the boundary where a
+  statement is fully name-resolved but code generation has not
+  started; see `native/vendor/README.md` for provenance and how to
+  re-derive or bump the vendored copy). Outside `parse` the library
+  behaves exactly like stock SQLite.
 - **The dump is post-resolution, pre-optimizer.** For SELECT that is
   right after `sqlite3SelectPrep` — views expanded, `*` expanded,
   names resolved — and *before* subquery flattening or push-down, so
@@ -90,8 +92,8 @@ executed.
 ## Building and running
 
 Requirements: JDK 21+ (FFM bindings are final in 22+), CMake ≥ 3.20,
-Ninja, a C compiler, `patch`, `curl` + `openssl` (for the vendored
-fetch), Clojure CLI.
+Ninja, a C compiler, Clojure CLI. The SQLite sources are vendored in
+the tree, so builds are fully offline.
 
 ```sh
 clojure -T:build native   # fetch amalgamation, apply patch, build libsqltree
@@ -201,8 +203,9 @@ documented so nothing surprises you:
 
 ```
 native/
-  vendor/fetch.sh       pinned amalgamation download (SHA3-256)
-  patch/parsecov.patch  the 29 hooks (apply with `patch -p0`)
+  vendor/sqlite3.c,.h   vendored 3.54.1; .c carries the patch
+  vendor/README.md      provenance: version, zip hash, re-derivation
+  patch/parsecov.patch  the 29 hooks = the delta vs upstream
   src/sqltree_hooks.h   hook contract
   src/sqltree.c         serializer + resolver driver + sqt_*/JNI
   src/sqltree_all.c     the single TU: amalgamation + serializer
