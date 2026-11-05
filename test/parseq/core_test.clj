@@ -118,10 +118,10 @@
 (deftest-both values-form [p]
   (let [v (-> (stmt p "VALUES (3),(4),(5)") :stmt :from first :select)]
     (is (= :values (:node v)))
-    (is (= [[3] [4] [5]]
+    (is (= [[3]]
            (mapv (fn [row] (mapv (comp :int-value :expr) row)) (:rows v)))
-        "constant rows sqlite folds into its co-routine are captured
-         before they are freed")))
+        "sqlite compiles constant rows 2+ into its co-routine and
+         frees them at parse time; the dump shows its own tree")))
 
 (deftest-both insert-upsert-returning [p]
   (let [tree (-> (stmt p "INSERT INTO orders (uid, total) VALUES (1, 9.5) ON CONFLICT (uid) DO UPDATE SET total = total + 1 RETURNING oid, total")

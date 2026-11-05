@@ -8,7 +8,7 @@
 `sqlite3.h` is byte-for-byte upstream.
 
 `sqlite3.c` is upstream **with parsecov.patch applied** (see
-`../patch/parsecov.patch`, 29 hunks). The patch is the reviewable
+`../patch/parsecov.patch`, 28 hunks). The patch is the reviewable
 record of every change parseq makes to SQLite; it is kept in the tree
 so `git log` on this file never has to stand in for reading the delta.
 

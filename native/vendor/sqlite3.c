@@ -140128,7 +140128,6 @@ SQLITE_PRIVATE Select *sqlite3MultiValues(Parse *pParse, Select *pLeft, ExprList
         sqlite3VdbeAddOp1(pParse->pVdbe, OP_Yield, pSubq->regReturn);
       }
     }
-    sqltreeValuesRow(pParse, pLeft, pRow);
     sqlite3ExprListDelete(pParse->db, pRow);
   }
 

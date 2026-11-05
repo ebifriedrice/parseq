@@ -29,16 +29,6 @@ typedef struct SqtSession {
   sqlite3 *db;
 } SqtSession;
 
-/* Constant rows 2..N of a multi-row VALUES clause are code-generated
-** and freed inside sqlite3MultiValues before any dump can see them;
-** sqltreeValuesRow serializes each into one of these buckets keyed by
-** the co-routine body select they belong to. */
-typedef struct SqtValuesExtra {
-  Select *pBody;
-  sqlite3_str *rows;        /* pre-serialized " [..] [..]" row items */
-  struct SqtValuesExtra *pNext;
-} SqtValuesExtra;
-
 typedef struct SqtCtx {
   Parse *pParse;
   sqlite3_str *out;         /* completed statement envelopes */
@@ -47,7 +37,6 @@ typedef struct SqtCtx {
   const char *zStmtStart;   /* start of current statement */
   int hasNode;              /* a verb hook dumped the current statement */
   int depth;                /* tree recursion guard */
-  SqtValuesExtra *pValues;  /* captured VALUES rows for this statement */
 } SqtCtx;
 
 static SqtCtx *g_ctx = 0;
@@ -937,9 +926,9 @@ static void sqtSelect(SqtCtx *c, const Select *p){
   c->depth++;
 
   /* VALUES (...), (...) are linked through pPrior with SF_MultiValue;
-  ** surface them as an explicit :values node with all rows. Constant
-  ** rows beyond the first live only in captured buckets (see
-  ** SqtValuesExtra) because sqlite frees them at parse time. */
+  ** surface them as an explicit :values node. Rows beyond the first
+  ** are freed by sqlite3MultiValues at parse time, so the dump shows
+  ** exactly the rows sqlite's own tree still holds. */
   if( (p->selFlags & SF_Values)!=0 ){
     const Select *pt;
     int n = 0;
@@ -966,15 +955,6 @@ static void sqtSelect(SqtCtx *c, const Select *p){
           }
         }
         sqlite3StackFree(c->pParse->db, (void*)ap);
-      }
-    }
-    {   /* rows sqlite folded into the co-routine and freed at parse time */
-      const SqtValuesExtra *px;
-      for(px=c->pValues; px; px=px->pNext){
-        if( px->pBody==p && px->rows ){
-          const char *z = sqlite3_str_value(px->rows);
-          if( z && z[0] ) sqlite3_str_appendall(o, z);
-        }
       }
     }
     sqtVecEnd(o);
@@ -1370,50 +1350,7 @@ int sqltreeStmtFinish(Parse *pParse){
   ** the tail would start a new Parse, so clear it here to match */
   pParse->explain = 0;
   c->zStmtStart = sqtNextStmtStart(zEnd, c->zSql + strlen(c->zSql));
-  while( c->pValues ){
-    SqtValuesExtra *pNext = c->pValues->pNext;
-    sqlite3_str_free(c->pValues->rows);
-    sqlite3DbFree(pParse->db, c->pValues);
-    c->pValues = pNext;
-  }
   return 1;   /* skip all of sqlite3FinishCoding */
-}
-
-int sqltreeValuesRow(Parse *pParse, Select *pValuesSelect, ExprList *pRow){
-  SqtCtx *c = sqtCtx(pParse);
-  SqtValuesExtra *px;
-  Select *pBody;
-  if( c==0 || pRow==0 ) return 0;
-  /* sqlite3MultiValues hands us the outer select; the :values node the
-  ** dump emits is the co-routine body inside its FROM item */
-  pBody = pValuesSelect;
-  if( pBody && pBody->pSrc && pBody->pSrc->nSrc>0
-   && pBody->pSrc->a[0].fg.isSubquery
-   && pBody->pSrc->a[0].u4.pSubq ){
-    pBody = pBody->pSrc->a[0].u4.pSubq->pSelect;
-  }
-  for(px=c->pValues; px; px=px->pNext){
-    if( px->pBody==pBody ) break;
-  }
-  if( px==0 ){
-    px = (SqtValuesExtra*)sqlite3DbMallocRaw(pParse->db, sizeof(*px));
-    if( px==0 ) return 0;
-    px->pBody = pBody;
-    px->rows = sqlite3_str_new(pParse->db);
-    px->pNext = c->pValues;
-    c->pValues = px;
-  }
-  sqlite3_str_appendchar(px->rows, 1, ' ');
-  sqtVec(px->rows);
-  /* save/restore the node buffer: sqtExprList writes into c->node */
-  {
-    sqlite3_str *save = c->node;
-    c->node = px->rows;
-    sqtExprList(c, pRow);
-    c->node = save;
-  }
-  sqtVecEnd(px->rows);
-  return 0;   /* never take over: sqlite3MultiValues must still run */
 }
 
 int sqltreeSelect(Parse *pParse, Select *p){
@@ -2291,7 +2228,6 @@ SQT_API char *sqt_parse(void *h, const char *zSql){
   ctx.zStmtStart = zSql;
   ctx.hasNode = 0;
   ctx.depth = 0;
-  ctx.pValues = 0;
   g_ctx = &ctx;
   if( getenv("SQT_TRACE") ){
     fprintf(stderr, "[sqt] parse: %.120s\n", zSql);
@@ -2301,12 +2237,6 @@ SQT_API char *sqt_parse(void *h, const char *zSql){
   sqlite3RunParser(&sParse, zSql);
 
   g_ctx = 0;
-  while( ctx.pValues ){
-    SqtValuesExtra *pNext = ctx.pValues->pNext;
-    sqlite3_str_free(ctx.pValues->rows);
-    sqlite3DbFree(db, ctx.pValues);
-    ctx.pValues = pNext;
-  }
 
   if( sParse.nErr || sParse.zErrMsg || sParse.rc!=SQLITE_OK ){
     /* the failing statement never reaches FinishCoding; emit it as an

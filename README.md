@@ -48,7 +48,7 @@ executed.
             │  native/  — one shared library, libsqltree.so  │
             │                                                │
   SQL ────► │  vendored SQLite 3.54.1 amalgamation           │
-            │   + native/patch/parsecov.patch (29 hunks)     │
+            │   + native/patch/parsecov.patch (28 hunks)     │
             │   + native/src/sqltree.c (serializer)          │
             │                                                │
             │  hooks fire between name resolution and        │
@@ -69,7 +69,7 @@ executed.
 
 - **The parser and resolver are SQLite's own.** `native/vendor/`
   carries SQLite 3.54.1 (`sqlite3.h` byte-for-byte upstream,
-  `sqlite3.c` upstream plus `parsecov.patch` — a reviewable 29-hunk
+  `sqlite3.c` upstream plus `parsecov.patch` — a reviewable 28-hunk
   diff that inserts guarded hook calls at the boundary where a
   statement is fully name-resolved but code generation has not
   started; see `native/vendor/README.md` for provenance and how to
@@ -144,7 +144,7 @@ Statements are envelopes: `{:stmt <node> :sql "raw text" :explain 0|1|2}`
 |---|---|
 | `:select` | `:distinct`, `:columns`, `:from`, `:where`, `:group-by`, `:having`, `:order-by`, `:limit`, `:windows`, `:ctes` |
 | `:compound` | `:op :union/:except/:intersect/:union-all`, `:left`, `:right`; trailing `:order-by`/`:limit` (they bind to the compound) |
-| `:values` | `:rows` — includes rows SQLite folds into its VALUES co-routine (captured before they are freed) |
+| `:values` | `:rows` — the rows SQLite's own tree still holds (constant rows 2+ are freed at parse time) |
 | `:table` (FROM) | `:name`, `:schema`, `:alias`, `:cursor`, resolved `:columns`, `:join {:type [:left :outer] :on/:using}`, `:indexed-by`, `:not-indexed` |
 | `:subquery` (FROM) | as above plus `:select`; `:view true` when it is an expanded view, `:cte true` for CTEs |
 | `:table-function` | `:name`, `:args` |
@@ -190,8 +190,8 @@ documented so nothing surprises you:
   SQLite as reduced-size packed duplicates. parseq always resolves and
   dumps full-size copies; SQLite's own fire-time code does the same.
 - **Multi-row constant VALUES** are compiled to a co-routine by the
-  parser and rows 2+ are freed at parse time; parseq captures them
-  before deletion so `:values` still lists every row.
+  parser and rows 2+ are freed at parse time, so `:values` lists only
+  the first row. This is SQLite's own tree, unembellished.
 - Deep trees cover the verbs listed above. Rarer verbs (ATTACH,
   ANALYZE, REINDEX, ...) are leaf nodes with their arguments; CREATE
   VIRTUAL TABLE currently dumps as `:other`.
