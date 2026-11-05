@@ -114,7 +114,7 @@ jobs:
           printf '{:deps {org.clojure/clojure {:mvn/version "1.12.6"}\n net.clojars.ebifriedrice/parseq {:local/root "%s"}}}' \
             "$GITHUB_WORKSPACE/$jar" > smoke-deps.edn
           clojure -Srepro -Sdeps "$(cat smoke-deps.edn)" -M \
-            -e '(require (quote [parseq.native :as n])) (println "embedded binding:" (n/default-impl))'
+            -e '(do (require (quote [parseq.native :as n])) (println "panama:" (n/native-version (n/make :panama))) (println "jni:" (n/native-version (n/make :jni))) (println "default:" (n/default-impl)))'
 
       - name: Deploy to Clojars (tag pushes only)
         if: startsWith(github.ref, 'refs/tags/v')
