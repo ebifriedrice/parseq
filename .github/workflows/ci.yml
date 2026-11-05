@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # the two Linux targets we ship; the release workflow covers
+        # macos/arm64 and windows/amd64 before anything deploys
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Install the Clojure CLI
+        run: |
+          curl -fLO https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh
+          sudo bash linux-install.sh
+
+      - name: Build the native library, the JNI glue, and run the suite
+        run: clojure -T:build test
+
+      - name: C-level smoke test
+        run: ctest --test-dir native/build --output-on-failure
