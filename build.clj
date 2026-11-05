@@ -4,7 +4,7 @@
             [deps-deploy.deps-deploy :as dd]))
 
 (def lib 'net.clojars.ebifriedrice/parseq)
-(def version "0.1.0-SNAPSHOT")
+(def version (or (System/getenv "PARSEQ_VERSION") "0.1.0-SNAPSHOT"))
 (def class-dir "target/classes")
 
 (defn native
