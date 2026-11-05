@@ -8,10 +8,11 @@ database's schema.
 ```clojure
 (require '[parseq.core :as pq])
 
-(def p (pq/parser))
-(pq/load-schema p conn)  ; any java.sql Connection to a SQLite database
+(pq/init! conn)  ; any java.sql Connection to a SQLite database
 
-(pq/parse p "SELECT u.name FROM users u WHERE u.id > ?1")
+(pq/parse "SELECT u.name FROM users u WHERE u.id > ?1")
+
+(pq/refresh-schema!)  ; after migrations on that connection
 ```
 
 ```clojure
@@ -111,7 +112,11 @@ clojure -T:build test     # both of the above, then the full suite
 
 | form | meaning |
 |---|---|
-| `(parser {:impl :panama \| :jni :path "..."})` | new session (defaults: Panama, `:memory:`) |
+| `(init! conn opts?)` | install the connection for one-arg `parse`; its schema is replayed, and the conn is only ever read but held until `close!` |
+| `(parse sql)` | parse against the installed parser |
+| `(refresh-schema!)` | rebuild the installed schema cache from the conn — unconditional, the explicit signal it changed |
+| `(close!)` | close the installed parser and forget the conn |
+| `(parser {:impl :panama \| :jni :path "..."})` | new explicit session (defaults: Panama, `:memory:`) |
 | `(load-schema p schema)` | a `java.sql.Connection` — its `sqlite_schema` DDL is read (never written) and replayed — or a DDL string for hand-built schemas; returns `{:error "..."}` on rejection |
 | `(schema-ddl conn)` | the connection's CREATE statements, in `sqlite_schema` order |
 | `(parse p sql)` | parse one or many statements; returns the tree; never throws for bad SQL |
