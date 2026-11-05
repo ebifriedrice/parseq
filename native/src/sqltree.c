@@ -18,7 +18,11 @@
 #include "sqltree_opnames.h"   /* generated: TK_ code -> name table */
 
 #ifndef SQT_API
-# define SQT_API __attribute__((visibility("default")))
+# ifdef _WIN32
+#  define SQT_API __declspec(dllexport)
+# else
+#  define SQT_API __attribute__((visibility("default")))
+# endif
 #endif
 
 /* ------------------------------------------------------------------ */

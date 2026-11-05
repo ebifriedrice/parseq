@@ -4,6 +4,10 @@ project(parseq_sqltree LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Ship the DLL without a CRT dependency: users of the jar should not
+# need the VC++ redistributable installed (what sqlite-jdbc does too).
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
@@ -53,7 +57,11 @@ target_compile_definitions(sqltree PRIVATE
   SQT_ENABLE_JNI=1
   SQLITE_ENABLE_COLUMN_METADATA=0)
 
-target_compile_options(sqltree PRIVATE -fvisibility=hidden -Wall -Wextra)
+if(MSVC)
+  target_compile_options(sqltree PRIVATE /W4)
+else()
+  target_compile_options(sqltree PRIVATE -fvisibility=hidden -Wall -Wextra)
+endif()
 
 set_target_properties(sqltree PROPERTIES
   OUTPUT_NAME sqltree
