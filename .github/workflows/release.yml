@@ -99,7 +99,7 @@ jobs:
       - name: The jar carries all four native targets
         run: |
           jar=$(ls target/net.clojars.ebifriedrice/parseq-*.jar)
-          count=$(unzip -l "$jar" | grep -c 'parseq/native/\(linux\|macos\|windows\)/')
+          count=$(unzip -l "$jar" | grep -c 'parseq/native/\(linux\|macos\|windows\)/[^/]*/[^/]*\.\(so\|dylib\|dll\)$')
           echo "$jar embeds $count native libraries"
           test "$count" -eq 4
 
