@@ -12,13 +12,14 @@
 
     (require '[parseq.core :as pq])
     (def p (pq/parser))
-    (pq/load-schema p \"CREATE TABLE t (a INTEGER PRIMARY KEY, b TEXT);\")
+    (pq/load-schema p conn)   ; any java.sql Connection to a SQLite db
     (pq/parse p \"SELECT b FROM t WHERE a > ?\")
 
   See README for the node reference and the exact resolution stage the
   dump reflects (post-resolution, pre-optimizer)."
   (:require [clojure.edn :as edn]
-            [parseq.native :as native]))
+            [parseq.native :as native])
+  (:import (java.sql Connection)))
 
 ;; The native handle lives in an atom so close is a one-shot: the swap
 ;; nils it and the winner performs the native close. Double close and
@@ -57,15 +58,39 @@
   (when (nil? (handle p))
     (throw (ex-info (str "parser is closed: " what) {}))))
 
+(defn schema-ddl
+  "The CREATE statements of every object in `conn`'s schema,
+  concatenated in sqlite_schema order (tables and indexes interleaved
+  the way SQLite stores them). This is the DDL load-schema replays
+  for a connection."
+  ^String [^Connection conn]
+  (with-open [stmt (.createStatement conn)
+              rs (.executeQuery stmt
+                    (str "SELECT sql FROM sqlite_schema"
+                         " WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_autoindex_%'"
+                         " ORDER BY rowid"))]
+    (let [sb (StringBuilder.)]
+      (loop []
+        (when (.next rs)
+          (doto sb
+            (.append (.getString rs 1))
+            (.append ";\n"))
+          (recur)))
+      (.toString sb))))
+
 (defn load-schema
-  "Execute `ddl` (one or more statements) against the session's
-  database so subsequent parses resolve names against it. Returns nil
-  on success or {:error \"...\"} when the DDL is rejected. This is the
-  only operation that touches database state."
-  [^Parser p ddl]
+  "Load a schema into the session so subsequent parses resolve against
+  it. `schema` is either a java.sql Connection to a SQLite database —
+  its sqlite_schema DDL is read and replayed, and the connection is
+  never written — or a string of DDL executed as-is. Returns nil on
+  success or {:error \"...\"} when sqlite rejects the DDL. This is the
+  only operation that touches database state (the session's own
+  scratch database)."
+  [^Parser p schema]
   (ensure-open p "load-schema")
-  (when-let [err (native/native-load-schema (:native p) (handle p) ddl)]
-    (edn/read-string err)))
+  (let [ddl (if (instance? Connection schema) (schema-ddl schema) schema)]
+    (when-let [err (native/native-load-schema (:native p) (handle p) ddl)]
+      (edn/read-string err))))
 
 (defn parse
   "Parse `sql` (one or more statements) and return the resolved tree:

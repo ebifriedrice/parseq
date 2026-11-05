@@ -19,25 +19,6 @@
             [parseq.native :as native])
   (:import (java.sql Connection)))
 
-(defn schema-ddl
-  "The CREATE statements of every object in the connection's schema,
-  concatenated in sqlite_schema order (tables and indexes interleaved
-  the way SQLite stores them)."
-  ^String [^Connection conn]
-  (with-open [stmt (.createStatement conn)
-              rs (.executeQuery stmt
-                    (str "SELECT sql FROM sqlite_schema"
-                         " WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_autoindex_%'"
-                         " ORDER BY rowid"))]
-    (let [sb (StringBuilder.)]
-      (loop []
-        (when (.next rs)
-          (doto sb
-            (.append (.getString rs 1))
-            (.append ";\n"))
-          (recur)))
-      (.toString sb))))
-
 (defn schema-version
   "PRAGMA schema_version of the connection; bump this to detect when a
   parser's replayed schema has gone stale."
@@ -60,7 +41,7 @@
       ;; DDL cannot drop what a previous replay created
       (let [h (native/native-open (:native parser) ":memory:")]
         (when-let [err (native/native-load-schema (:native parser) h
-                                                  (schema-ddl conn))]
+                                                  (pq/schema-ddl conn))]
           (native/native-close (:native parser) h)
           (throw (ex-info "schema replay failed"
                           {:error (edn/read-string err)})))

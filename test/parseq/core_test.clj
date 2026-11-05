@@ -8,7 +8,8 @@
   triggers - and that both impls agree on every tree."
   (:require [clojure.test :refer [deftest is testing]]
             [parseq.core :as pq]
-            [parseq.native :as native]))
+            [parseq.native :as native])
+  (:import (org.sqlite SQLiteDataSource)))
 
 (def ^:private schema
   (str "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL,"
@@ -39,6 +40,20 @@
 
 (defn- first-column-expr [p sql]
   (-> (stmt p sql) :stmt :columns first :expr))
+
+(deftest load-schema-from-connection
+  (with-open [conn (-> (doto (SQLiteDataSource.) (.setUrl "jdbc:sqlite::memory:"))
+                       (.getConnection))
+              st (.createStatement conn)]
+    (.executeUpdate st schema)
+    (each-impl
+      (fn [p]
+        (pq/load-schema p conn)
+        (is (= {:table "users" :schema "main" :name "name" :idx 1 :affinity :text}
+               (select-keys (first-column-expr p "SELECT u.name FROM users u")
+                            [:table :schema :name :idx :affinity])))
+        (is (= :error (-> (stmt p "SELECT nope FROM users") :node))
+            "names resolve against the replayed schema, unknown ones error")))))
 
 (deftest-both column-resolution [p]
   (testing "qualified column resolves to table, schema, index, affinity"

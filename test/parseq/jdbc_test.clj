@@ -49,7 +49,7 @@
   (with-open [conn (mem-conn)
               st (.createStatement conn)]
     (.executeUpdate st "CREATE TABLE t (a TEXT UNIQUE);")
-    (let [ddl (pqj/schema-ddl conn)]
+    (let [ddl (pq/schema-ddl conn)]
       (is (re-find #"CREATE TABLE t" ddl))
       (is (not (re-find #"sqlite_autoindex" ddl))
           "autoindexes are implicit in their table and must not be replayed"))))
