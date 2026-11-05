@@ -28,6 +28,7 @@
 /classes
 /target
 native/build/
+/natives/
 
 hs_err_pid*.log
 core.*

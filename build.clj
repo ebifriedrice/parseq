@@ -1,6 +1,7 @@
 (ns build
   (:refer-clojure :exclude [test])
-  (:require [clojure.tools.build.api :as b]
+  (:require [clojure.java.io :as io]
+            [clojure.tools.build.api :as b]
             [deps-deploy.deps-deploy :as dd]))
 
 (def lib 'net.clojars.ebifriedrice/parseq)
@@ -63,6 +64,16 @@
     [:developerConnection "scm:git:ssh:git@github.com:ebifriedrice/parseq.git"]
     [:tag (str "v" version)]]])
 
+(defn- stage-natives
+  "Copy the prebuilt native libraries staged under natives/ (layout
+  parseq/native/<os>/<arch>/<lib>, what the release workflow's
+  per-arch jobs upload) into the class dir, so the jar carries them
+  and the bindings can extract them at runtime. A no-op when the
+  staging dir is absent, so local jars keep building without it."
+  []
+  (when (.exists (io/file "natives"))
+    (b/copy-dir {:src-dirs ["natives"] :target-dir class-dir})))
+
 (defn- jar-opts [opts]
   (assoc opts
           :lib lib   :version version
@@ -81,12 +92,14 @@
     (b/write-pom opts)
     (println "\nCopying source...")
     (b/copy-dir {:src-dirs ["resources" "src"] :target-dir class-dir})
+    (stage-natives)
     (println "\nBuilding JAR..." (:jar-file opts))
     (b/jar opts))
   opts)
 
 (defn install "Install the JAR locally." [opts]
   (let [opts (jar-opts opts)]
+    (stage-natives)
     (b/install opts))
   opts)
 
