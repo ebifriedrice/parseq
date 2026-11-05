@@ -33,3 +33,6 @@ native/build/
 hs_err_pid*.log
 core.*
 native/build-*/
+
+# local tool/env config, never source
+/mise.toml
