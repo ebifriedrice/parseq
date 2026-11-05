@@ -9,7 +9,7 @@ database's schema.
 (require '[parseq.core :as pq])
 
 (def p (pq/parser))
-(pq/load-schema p "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);")
+(pq/load-schema p conn)  ; any java.sql Connection to a SQLite database
 
 (pq/parse p "SELECT u.name FROM users u WHERE u.id > ?1")
 ```
@@ -112,7 +112,8 @@ clojure -T:build test     # both of the above, then the full suite
 | form | meaning |
 |---|---|
 | `(parser {:impl :panama \| :jni :path "..."})` | new session (defaults: Panama, `:memory:`) |
-| `(load-schema p ddl)` | execute DDL so later parses resolve against it; returns `{:error "..."}` on rejection |
+| `(load-schema p schema)` | a `java.sql.Connection` — its `sqlite_schema` DDL is read (never written) and replayed — or a DDL string for hand-built schemas; returns `{:error "..."}` on rejection |
+| `(schema-ddl conn)` | the connection's CREATE statements, in `sqlite_schema` order |
 | `(parse p sql)` | parse one or many statements; returns the tree; never throws for bad SQL |
 | `(sqlite-version p)` | SQLite version compiled into libsqltree |
 | `(close p)` | idempotent; parser also implements `java.io.Closeable` |
