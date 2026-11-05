@@ -11,9 +11,13 @@
   Quickstart:
 
     (require '[parseq.core :as pq])
-    (def p (pq/parser))
-    (pq/load-schema p conn)   ; any java.sql Connection to a SQLite db
-    (pq/parse p \"SELECT b FROM t WHERE a > ?\")
+    (pq/init! conn)          ; any java.sql Connection to a SQLite db
+    (pq/parse \"SELECT b FROM t WHERE a > ?\")
+    (pq/refresh-schema!)     ; after migrations on that connection
+
+  The explicit surface — (parser opts), (load-schema p schema),
+  (parse p sql) — remains for juggling several parsers at once;
+  init! installs one globally.
 
   See README for the node reference and the exact resolution stage the
   dump reflects (post-resolution, pre-optimizer)."
@@ -92,6 +96,18 @@
     (when-let [err (native/native-load-schema (:native p) (handle p) ddl)]
       (edn/read-string err))))
 
+;; State for the init!/parse/refresh-schema! surface: the installed
+;; parser and the connection its schema was replayed from. parse needs
+;; only the parser; refresh-schema! re-reads the connection, so it
+;; must stay open until close!.
+(def ^:private session (atom nil))
+
+(defn- require-session
+  "The installed parser, or a throw pointing at init!."
+  []
+  (or (:parser @session)
+      (throw (ex-info "parseq is not initialized; call (init! conn)" {}))))
+
 (defn parse
   "Parse `sql` (one or more statements) and return the resolved tree:
 
@@ -100,10 +116,12 @@
 
   A statement that fails to parse appears as
   {:node :error :message \"..\" :offset 42}. Never throws for bad SQL;
-  throws only for infrastructure failures (missing library, OOM)."
-  [^Parser p sql]
-  (ensure-open p "parse")
-  (edn/read-string (native/native-parse (:native p) (handle p) sql)))
+  throws only for infrastructure failures (missing library, OOM). The
+  one-argument form parses against the parser installed by init!."
+  ([sql] (parse (require-session) sql))
+  ([^Parser p sql]
+   (ensure-open p "parse")
+   (edn/read-string (native/native-parse (:native p) (handle p) sql))))
 
 (defn sqlite-version
   "SQLite version compiled into the native library."
@@ -139,3 +157,39 @@
         (throw (ex-info "schema replay failed" {:error (edn/read-string err)})))
       (reset-handle! p h))
     p))
+
+(defn init!
+  "Install `conn` as the schema source for the one-argument parse and
+  return the parser. The connection's sqlite_schema is replayed into a
+  fresh session; the connection is only ever read (here and on
+  refresh-schema!) but must stay open until close!. Calling init!
+  again closes the parser it replaces. `opts` are as for parser."
+  ([conn] (init! conn nil))
+  ([conn opts]
+   (let [p (parser opts)]
+     (when-let [err (load-schema p conn)]
+       (close p)
+       (throw (ex-info "schema replay failed" err)))
+     (let [[old _] (swap-vals! session assoc :parser p :conn conn)]
+       (when-some [old-p (:parser old)]
+         (close old-p)))
+     p)))
+
+(defn refresh-schema!
+  "Rebuild the installed parser's schema from the connection init!
+  received, on a fresh native session. Unconditional: calling it is
+  the explicit signal that the schema changed. (parseq.jdbc/refresh!
+  is the schema_version-gated variant over an explicit parser.)"
+  []
+  (require-session)
+  (let [{:keys [parser conn]} @session]
+    (replay-schema! parser conn)))
+
+(defn close!
+  "Close the parser installed by init! and forget its connection.
+  Idempotent; explicit-handle parsers are unaffected."
+  []
+  (let [[old _] (swap-vals! session (constantly nil))]
+    (when-some [p (:parser old)]
+      (close p))
+    nil))

@@ -55,6 +55,30 @@
         (is (= :error (-> (stmt p "SELECT nope FROM users") :node))
             "names resolve against the replayed schema, unknown ones error")))))
 
+(deftest dynamic-surface
+  (with-open [conn (-> (doto (SQLiteDataSource.) (.setUrl "jdbc:sqlite::memory:"))
+                       (.getConnection))
+              st (.createStatement conn)]
+    (.executeUpdate st schema)
+    (try
+      (pq/init! conn)
+      (is (= {:table "users" :schema "main" :name "name" :idx 1 :affinity :text}
+             (-> (pq/parse "SELECT u.name FROM users u")
+                 :statements first :stmt :columns first :expr
+                 (select-keys [:table :schema :name :idx :affinity]))))
+      (.executeUpdate st "ALTER TABLE users ADD COLUMN extra TEXT;")
+      (is (= :error (-> (pq/parse "SELECT extra FROM users")
+                        :statements first :node))
+          "the replayed schema is a cache; it does not track the conn")
+      (pq/refresh-schema!)
+      (is (= "extra" (-> (pq/parse "SELECT extra FROM users")
+                         :statements first :stmt :columns first :expr :name)))
+      (pq/close!)
+      (is (thrown? Exception (pq/parse "SELECT 1"))
+          "parse without an installed parser fails fast")
+      (finally
+        (pq/close!)))))
+
 (deftest-both column-resolution [p]
   (testing "qualified column resolves to table, schema, index, affinity"
     (is (= {:table "users" :schema "main" :name "name" :idx 1 :affinity :text}
