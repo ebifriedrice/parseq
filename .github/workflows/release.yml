@@ -53,17 +53,20 @@ jobs:
       - name: C-level smoke test
         run: ctest --test-dir native/build -C Release --output-on-failure
 
+      # upload-artifact@v4 makes the uploaded directory itself the
+      # artifact root, so stage under dist/parseq/native/... to keep
+      # the full jar resource path inside the artifact
       - name: Stage the library under the jar's resource layout
         shell: bash
         run: |
-          dest="parseq/native/${{ matrix.os-name }}/${{ matrix.arch }}"
+          dest="dist/parseq/native/${{ matrix.os-name }}/${{ matrix.arch }}"
           mkdir -p "$dest"
           cp -L "${{ matrix.lib }}" "$dest/$(basename "${{ matrix.lib }}")"
 
       - uses: actions/upload-artifact@v4
         with:
           name: natives-${{ matrix.os-name }}-${{ matrix.arch }}
-          path: parseq/native/
+          path: dist
 
   jar:
     name: assemble jar
@@ -99,7 +102,9 @@ jobs:
       - name: The jar carries all four native targets
         run: |
           jar=$(ls target/net.clojars.ebifriedrice/parseq-*.jar)
-          count=$(unzip -l "$jar" | grep -c 'parseq/native/\(linux\|macos\|windows\)/[^/]*/[^/]*\.\(so\|dylib\|dll\)$')
+          matches=$(unzip -l "$jar" | grep 'parseq/native/\(linux\|macos\|windows\)/[^/]*/[^/]*\.\(so\|dylib\|dll\)$' || true)
+          echo "$matches"
+          count=$(printf '%s\n' "$matches" | grep -c . || true)
           echo "$jar embeds $count native libraries"
           test "$count" -eq 4
 
