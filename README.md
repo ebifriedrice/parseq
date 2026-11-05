@@ -88,6 +88,19 @@ executed.
   `{:node :error :message "..." :offset 42}` — `parse` never throws for
   bad SQL.
 
+## Installing
+
+```clojure
+net.clojars.ebifriedrice/parseq {:mvn/version "0.1.0"}
+```
+
+Released jars carry precompiled `libsqltree` for linux/amd64,
+linux/arm64, macos/arm64 (Apple Silicon) and windows/amd64, so the
+usual dependency line is all you need on any of those. Other
+platforms (Intel Macs included) build the library locally instead —
+see the next section; `-Dparseq.lib` or `java.library.path` will
+find it.
+
 ## Building and running
 
 Requirements: CMake ≥ 3.20, Ninja, a C compiler, Clojure CLI, and a
@@ -105,7 +118,25 @@ clojure -T:build test     # both of the above, then the full suite
 
 `clojure -M:dev` gives you a REPL with `java.library.path` and
 `--enable-native-access` set. The native library is found via
-`-Dparseq.lib=/path/to/libsqltree.so`, then `java.library.path`.
+`-Dparseq.lib=/path/to/libsqltree.so`, then `java.library.path`,
+then the copy embedded in the parseq jar for the running platform
+(extracted to a temp file at first use).
+
+## Releasing
+
+Deploys happen only on version bumps: push a tag and CI does the
+rest.
+
+```sh
+git tag v0.1.0 && git push github v0.1.0   # and origin, for sr.ht
+```
+
+The release workflow builds the native library on every shipped
+arch (linux/amd64, linux/arm64, macos/arm64, windows/amd64), runs
+the C smoke test per arch, assembles one jar carrying all four,
+proves the jar loads its natives on a bare JVM, then publishes to
+Clojars under the tag's version (`v0.1.0` → `0.1.0`). Dispatching
+the workflow by hand runs everything except the deploy — a dry run.
 
 ## The API
 
@@ -206,7 +237,7 @@ src/parseq/
   native/jni.clj        JNI bindings via parseq.sqltree.Sqltree
   core.clj              init!/parse/refresh-schema! dynamic surface,
                         Parser, load-schema, replay-schema!, close
-java/parseq/sqltree/    the JNI glue class
+java/parseq/sqltree/    the JNI glue class + its native loader
 test/parseq/            resolution suite (runs under both bindings)
 ```
 
