@@ -138,8 +138,8 @@
   nil)
 
 (defn reset-handle!
-  "Swap in a fresh native handle (used by parseq.jdbc/refresh! to
-  replay a schema from scratch). Closes the previous one. Internal."
+  "Swap in a fresh native handle (replay-schema! installs a fresh
+  session through it). Closes the previous one. Internal."
   [^Parser p new-h]
   (let [[old _] (swap-vals! (:session p) #(assoc % :handle new-h))]
     (when-some [h (:handle old)]
@@ -149,7 +149,7 @@
   "Replay `conn`'s schema into `parser` on a fresh native session,
   replacing whatever it held — schemas can shrink, and exec'd DDL
   cannot drop what an earlier replay created. Throws on a rejected
-  replay. Workhorse of refresh-schema! and parseq.jdbc/refresh!."
+  replay. Workhorse of refresh-schema!."
   [^Parser p ^Connection conn]
   (let [n (:native p)]
     (let [h (native/native-open n ":memory:")]
@@ -179,8 +179,7 @@
 (defn refresh-schema!
   "Rebuild the installed parser's schema from the connection init!
   received, on a fresh native session. Unconditional: calling it is
-  the explicit signal that the schema changed. (parseq.jdbc/refresh!
-  is the schema_version-gated variant over an explicit parser.)"
+  the explicit signal that the schema changed."
   []
   (require-session)
   (let [{:keys [parser conn]} @session]
