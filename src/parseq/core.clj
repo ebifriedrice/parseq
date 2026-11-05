@@ -43,7 +43,8 @@
   "Create a parser session.
 
   Options:
-    :impl  :panama (default, FFM) or :jni
+    :impl  :panama (FFM, needs a recent JVM) or :jni; the default is
+           whichever binding loads on this JVM, FFM preferred
     :path  SQLite database path (default \":memory:\"). A file path
            resolves against that file's schema as opened; parsing
            never executes or mutates anything.
@@ -52,7 +53,7 @@
   executed. Use load-schema to make names resolvable."
   (^Parser [] (parser nil))
   (^Parser [opts]
-   (let [impl (or (:impl opts) :panama)
+   (let [impl (or (:impl opts) (native/default-impl))
          n (native/make impl)
          h (native/native-open n (or (:path opts) ":memory:"))]
      (->Parser n impl (atom {:handle h})))))

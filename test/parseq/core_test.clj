@@ -288,6 +288,11 @@
         (when (> (count results) 1)
           (is (apply = results) "impls produce identical trees"))))))
 
+(deftest default-binding-by-jvm
+  (with-open [p (pq/parser)]
+    (is (contains? (set (native/available)) (:impl p))
+        "the zero-opts parser runs on whichever binding this JVM loads")))
+
 (deftest close-is-one-shot
   (with-open [p (pq/parser)]
     (pq/close p)

@@ -47,15 +47,20 @@
                       (resolve 'parseq.native.jni/->JniNative)
                       (catch Throwable _ nil))}))
 
+(defn default-impl
+  "The first binding that loads on this JVM, Panama preferred: each
+  candidate is constructed and exercised (native-version) inside a
+  try, so JVMs without the FFM API — or with it denied — fall to JNI,
+  and a JVM missing libsqltree reports no candidates."
+  []
+  (or (first (available))
+      (throw (ex-info "no parseq native implementation could load; is libsqltree on java.library.path?"
+                      {:available []}))))
+
 (defn make
-  "Instantiate a binding. `impl` is :panama or :jni; defaults to the
-  first available, Panama preferred."
-  ([]
-   (let [[k & _] (available)]
-     (when-not k
-       (throw (ex-info "no parseq native implementation could load; is libsqltree on java.library.path?"
-                       {:available []})))
-     (make k)))
+  "Instantiate a binding. `impl` is :panama or :jni; defaults to
+  default-impl."
+  ([] (make (default-impl)))
   ([impl]
    (case impl
      :panama (do (require 'parseq.native.panama)
