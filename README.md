@@ -91,7 +91,7 @@ executed.
 ## Installing
 
 ```clojure
-net.clojars.ebifriedrice/parseq {:mvn/version "0.1.0"}
+net.clojars.ebifriedrice/parseq {:mvn/version "0.1.1"}
 ```
 
 Released jars carry precompiled `libsqltree` for linux/amd64,
